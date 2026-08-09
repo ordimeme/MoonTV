@@ -6,7 +6,6 @@ interface D1PreparedStatement {
 
 interface D1Database {
   prepare(sql: string): D1PreparedStatement;
-  exec(sql: string): Promise<unknown>;
 }
 
 interface RateLimitRow {
@@ -62,9 +61,58 @@ function getD1(): D1Database | null {
 
 async function ensureTable(db: D1Database): Promise<void> {
   if (!tableReady) {
-    tableReady = db.exec(TABLE_SQL).then(() => undefined);
+    tableReady = db
+      .prepare(TABLE_SQL)
+      .run()
+      .then(() => undefined)
+      .catch((error) => {
+        tableReady = null;
+        throw error;
+      });
   }
   await tableReady;
+}
+
+function checkLocalRateLimit(
+  key: string,
+  policy: RateLimitPolicy,
+  now: number
+): RateLimitStatus {
+  const bucket = localBuckets.get(key);
+  if (!bucket || bucket.windowStart + policy.windowMs <= now) {
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  if (bucket.blockedUntil > now) {
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.ceil((bucket.blockedUntil - now) / 1000),
+    };
+  }
+  return { allowed: true, retryAfterSeconds: 0 };
+}
+
+function recordLocalFailure(
+  key: string,
+  policy: RateLimitPolicy,
+  now: number
+): void {
+  const existing = localBuckets.get(key);
+  const withinWindow = Boolean(
+    existing && existing.windowStart + policy.windowMs > now
+  );
+  const attempts = existing && withinWindow ? existing.attempts + 1 : 1;
+  localBuckets.set(key, {
+    attempts,
+    windowStart: existing && withinWindow ? existing.windowStart : now,
+    blockedUntil: attempts >= policy.maxAttempts ? now + policy.blockMs : 0,
+  });
+  if (localBuckets.size > 1000) {
+    localBuckets.forEach((bucket, bucketKey) => {
+      if (bucket.windowStart + policy.windowMs <= now) {
+        localBuckets.delete(bucketKey);
+      }
+    });
+  }
 }
 
 async function hashIdentifier(value: string): Promise<string> {
@@ -98,36 +146,29 @@ export async function checkRateLimit(
 ): Promise<RateLimitStatus> {
   const db = getD1();
   if (db) {
-    await ensureTable(db);
-    const row = await db
-      .prepare(
-        'SELECT attempts, window_start, blocked_until FROM auth_rate_limits WHERE key_hash = ?'
-      )
-      .bind(key)
-      .first<RateLimitRow>();
-    if (!row || row.window_start + policy.windowMs <= now) {
+    try {
+      await ensureTable(db);
+      const row = await db
+        .prepare(
+          'SELECT attempts, window_start, blocked_until FROM auth_rate_limits WHERE key_hash = ?'
+        )
+        .bind(key)
+        .first<RateLimitRow>();
+      if (!row || row.window_start + policy.windowMs <= now) {
+        return { allowed: true, retryAfterSeconds: 0 };
+      }
+      if (row.blocked_until > now) {
+        return {
+          allowed: false,
+          retryAfterSeconds: Math.ceil((row.blocked_until - now) / 1000),
+        };
+      }
       return { allowed: true, retryAfterSeconds: 0 };
+    } catch {
+      return checkLocalRateLimit(key, policy, now);
     }
-    if (row.blocked_until > now) {
-      return {
-        allowed: false,
-        retryAfterSeconds: Math.ceil((row.blocked_until - now) / 1000),
-      };
-    }
-    return { allowed: true, retryAfterSeconds: 0 };
   }
-
-  const bucket = localBuckets.get(key);
-  if (!bucket || bucket.windowStart + policy.windowMs <= now) {
-    return { allowed: true, retryAfterSeconds: 0 };
-  }
-  if (bucket.blockedUntil > now) {
-    return {
-      allowed: false,
-      retryAfterSeconds: Math.ceil((bucket.blockedUntil - now) / 1000),
-    };
-  }
-  return { allowed: true, retryAfterSeconds: 0 };
+  return checkLocalRateLimit(key, policy, now);
 }
 
 export async function recordRateLimitFailure(
@@ -137,23 +178,25 @@ export async function recordRateLimitFailure(
 ): Promise<void> {
   const db = getD1();
   if (db) {
-    await ensureTable(db);
-    const existing = await db
-      .prepare(
-        'SELECT attempts, window_start, blocked_until FROM auth_rate_limits WHERE key_hash = ?'
-      )
-      .bind(key)
-      .first<RateLimitRow>();
-    const withinWindow = Boolean(
-      existing && existing.window_start + policy.windowMs > now
-    );
-    const attempts = existing && withinWindow ? existing.attempts + 1 : 1;
-    const windowStart = existing && withinWindow ? existing.window_start : now;
-    const blockedUntil =
-      attempts >= policy.maxAttempts ? now + policy.blockMs : 0;
-    await db
-      .prepare(
-        `INSERT INTO auth_rate_limits
+    try {
+      await ensureTable(db);
+      const existing = await db
+        .prepare(
+          'SELECT attempts, window_start, blocked_until FROM auth_rate_limits WHERE key_hash = ?'
+        )
+        .bind(key)
+        .first<RateLimitRow>();
+      const withinWindow = Boolean(
+        existing && existing.window_start + policy.windowMs > now
+      );
+      const attempts = existing && withinWindow ? existing.attempts + 1 : 1;
+      const windowStart =
+        existing && withinWindow ? existing.window_start : now;
+      const blockedUntil =
+        attempts >= policy.maxAttempts ? now + policy.blockMs : 0;
+      await db
+        .prepare(
+          `INSERT INTO auth_rate_limits
           (key_hash, attempts, window_start, blocked_until, updated_at)
          VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(key_hash) DO UPDATE SET
@@ -161,40 +204,32 @@ export async function recordRateLimitFailure(
           window_start = excluded.window_start,
           blocked_until = excluded.blocked_until,
           updated_at = excluded.updated_at`
-      )
-      .bind(key, attempts, windowStart, blockedUntil, now)
-      .run();
-    return;
+        )
+        .bind(key, attempts, windowStart, blockedUntil, now)
+        .run();
+      return;
+    } catch {
+      recordLocalFailure(key, policy, now);
+      return;
+    }
   }
-
-  const existing = localBuckets.get(key);
-  const withinWindow = Boolean(
-    existing && existing.windowStart + policy.windowMs > now
-  );
-  const attempts = existing && withinWindow ? existing.attempts + 1 : 1;
-  localBuckets.set(key, {
-    attempts,
-    windowStart: existing && withinWindow ? existing.windowStart : now,
-    blockedUntil: attempts >= policy.maxAttempts ? now + policy.blockMs : 0,
-  });
-  if (localBuckets.size > 1000) {
-    localBuckets.forEach((bucket, bucketKey) => {
-      if (bucket.windowStart + policy.windowMs <= now) {
-        localBuckets.delete(bucketKey);
-      }
-    });
-  }
+  recordLocalFailure(key, policy, now);
 }
 
 export async function clearRateLimit(key: string): Promise<void> {
   const db = getD1();
   if (db) {
-    await ensureTable(db);
-    await db
-      .prepare('DELETE FROM auth_rate_limits WHERE key_hash = ?')
-      .bind(key)
-      .run();
-    return;
+    try {
+      await ensureTable(db);
+      await db
+        .prepare('DELETE FROM auth_rate_limits WHERE key_hash = ?')
+        .bind(key)
+        .run();
+      return;
+    } catch {
+      localBuckets.delete(key);
+      return;
+    }
   }
   localBuckets.delete(key);
 }
