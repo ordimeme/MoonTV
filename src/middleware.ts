@@ -9,7 +9,7 @@ export async function middleware(request: NextRequest) {
 
   // 跳过不需要认证的路径
   if (shouldSkipAuth(pathname)) {
-    return NextResponse.next();
+    return withSecurityHeaders(NextResponse.next());
   }
 
   const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
@@ -17,7 +17,7 @@ export async function middleware(request: NextRequest) {
   if (!process.env.PASSWORD) {
     // 如果没有设置密码，重定向到警告页面
     const warningUrl = new URL('/warning', request.url);
-    return NextResponse.redirect(warningUrl);
+    return withSecurityHeaders(NextResponse.redirect(warningUrl));
   }
 
   const token = request.cookies.get('auth')?.value;
@@ -33,7 +33,42 @@ export async function middleware(request: NextRequest) {
   if (expectedMode === 'database' && !session.username) {
     return handleAuthFailure(request, pathname);
   }
-  return NextResponse.next();
+  return withSecurityHeaders(NextResponse.next());
+}
+
+function withSecurityHeaders(response: NextResponse): NextResponse {
+  response.headers.set(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'none'",
+      "form-action 'self'",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https:",
+      "media-src 'self' blob: https:",
+      "connect-src 'self' https:",
+      "font-src 'self' data:",
+      "worker-src 'self' blob:",
+      "manifest-src 'self'",
+      'upgrade-insecure-requests',
+    ].join('; ')
+  );
+  response.headers.set(
+    'Strict-Transport-Security',
+    'max-age=31536000; includeSubDomains'
+  );
+  response.headers.set('X-Content-Type-Options', 'nosniff');
+  response.headers.set('X-Frame-Options', 'DENY');
+  response.headers.set('Referrer-Policy', 'same-origin');
+  response.headers.set(
+    'Permissions-Policy',
+    'camera=(), microphone=(), geolocation=(), payment=()'
+  );
+  response.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+  return response;
 }
 
 // 处理认证失败的情况
@@ -43,7 +78,9 @@ function handleAuthFailure(
 ): NextResponse {
   // 如果是 API 路由，返回 401 状态码
   if (pathname.startsWith('/api')) {
-    return new NextResponse('Unauthorized', { status: 401 });
+    return withSecurityHeaders(
+      new NextResponse('Unauthorized', { status: 401 })
+    );
   }
 
   // 否则重定向到登录页面
@@ -51,12 +88,22 @@ function handleAuthFailure(
   // 保留完整的URL，包括查询参数
   const fullUrl = `${pathname}${request.nextUrl.search}`;
   loginUrl.searchParams.set('redirect', fullUrl);
-  return NextResponse.redirect(loginUrl);
+  return withSecurityHeaders(NextResponse.redirect(loginUrl));
 }
 
 // 判断是否需要跳过认证的路径
 function shouldSkipAuth(pathname: string): boolean {
-  const skipPaths = [
+  const publicPaths = [
+    '/login',
+    '/warning',
+    '/api/login',
+    '/api/register',
+    '/api/logout',
+    '/api/server-config',
+  ];
+  if (publicPaths.includes(pathname)) return true;
+
+  const publicPrefixes = [
     '/_next',
     '/favicon.ico',
     '/robots.txt',
@@ -66,12 +113,10 @@ function shouldSkipAuth(pathname: string): boolean {
     '/screenshot.png',
   ];
 
-  return skipPaths.some((path) => pathname.startsWith(path));
+  return publicPrefixes.some((path) => pathname.startsWith(path));
 }
 
 // 配置middleware匹配规则
 export const config = {
-  matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|login|warning|api/login|api/register|api/logout|api/server-config).*)',
-  ],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };
