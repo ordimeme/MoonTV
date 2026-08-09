@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
 import { getStorage } from '@/lib/db';
+import { readLimitedJson } from '@/lib/request-security';
 
 export const runtime = 'edge';
 
@@ -20,9 +21,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json();
+    const body = await readLimitedJson<Record<string, unknown>>(
+      request,
+      16 * 1024
+    );
 
-    const authInfo = getAuthInfoFromCookie(request);
+    const authInfo = await getAuthInfoFromCookie(request);
     if (!authInfo || !authInfo.username) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -57,6 +61,18 @@ export async function POST(request: NextRequest) {
       typeof DisableYellowFilter !== 'boolean'
     ) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
+    }
+    if (
+      SiteName.length > 100 ||
+      Announcement.length > 5000 ||
+      SearchDownstreamMaxPage < 1 ||
+      SearchDownstreamMaxPage > 10 ||
+      SiteInterfaceCacheTime < 0 ||
+      SiteInterfaceCacheTime > 86400 ||
+      ImageProxy.length > 2048 ||
+      DoubanProxy.length > 2048
+    ) {
+      return NextResponse.json({ error: '参数超出允许范围' }, { status: 400 });
     }
 
     const adminConfig = await getConfig();

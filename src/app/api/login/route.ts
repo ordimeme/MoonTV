@@ -1,12 +1,24 @@
 /* eslint-disable no-console */
 import { NextRequest, NextResponse } from 'next/server';
 
+import {
+  checkRateLimit,
+  clearRateLimit,
+  createRateLimitKey,
+  LOGIN_RATE_LIMIT,
+  recordRateLimitFailure,
+} from '@/lib/auth-rate-limit';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
+import {
+  readLimitedJson,
+  RequestValidationError,
+} from '@/lib/request-security';
 import {
   type SessionRole,
   authCookieOptions,
   createSessionToken,
+  getSessionSecret,
 } from '@/lib/session';
 
 export const runtime = 'edge';
@@ -25,8 +37,8 @@ async function setSessionCookie(
   role: SessionRole,
   username?: string
 ) {
-  const secret = process.env.PASSWORD;
-  if (!secret) throw new Error('PASSWORD is not configured');
+  const secret = getSessionSecret();
+  if (!secret) throw new Error('SESSION_SECRET is not configured');
   response.cookies.set(
     'auth',
     await createSessionToken(secret, {
@@ -39,7 +51,25 @@ async function setSessionCookie(
 }
 
 export async function POST(req: NextRequest) {
+  let rateLimitKey = '';
   try {
+    const body = await readLimitedJson<{
+      username?: unknown;
+      password?: unknown;
+    }>(req);
+    const identity = typeof body.username === 'string' ? body.username : '';
+    rateLimitKey = await createRateLimitKey(req, 'login', identity);
+    const rateLimit = await checkRateLimit(rateLimitKey, LOGIN_RATE_LIMIT);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: '尝试次数过多，请稍后再试' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(rateLimit.retryAfterSeconds) },
+        }
+      );
+    }
+
     // 本地 / localStorage 模式——仅校验固定密码
     if (STORAGE_TYPE === 'localstorage') {
       const envPassword = process.env.PASSWORD;
@@ -58,12 +88,13 @@ export async function POST(req: NextRequest) {
         return response;
       }
 
-      const { password } = await req.json();
+      const { password } = body;
       if (typeof password !== 'string') {
         return NextResponse.json({ error: '密码不能为空' }, { status: 400 });
       }
 
       if (password !== envPassword) {
+        await recordRateLimitFailure(rateLimitKey, LOGIN_RATE_LIMIT);
         return NextResponse.json(
           { ok: false, error: '密码错误' },
           { status: 401 }
@@ -73,17 +104,18 @@ export async function POST(req: NextRequest) {
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       await setSessionCookie(response, 'user');
+      await clearRateLimit(rateLimitKey);
 
       return response;
     }
 
     // 数据库 / redis 模式——校验用户名并尝试连接数据库
-    const { username, password } = await req.json();
+    const { username, password } = body;
 
-    if (!username || typeof username !== 'string') {
+    if (!username || typeof username !== 'string' || username.length > 64) {
       return NextResponse.json({ error: '用户名不能为空' }, { status: 400 });
     }
-    if (!password || typeof password !== 'string') {
+    if (!password || typeof password !== 'string' || password.length > 128) {
       return NextResponse.json({ error: '密码不能为空' }, { status: 400 });
     }
 
@@ -95,15 +127,18 @@ export async function POST(req: NextRequest) {
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       await setSessionCookie(response, 'owner', username);
+      await clearRateLimit(rateLimitKey);
 
       return response;
     } else if (username === process.env.USERNAME) {
+      await recordRateLimitFailure(rateLimitKey, LOGIN_RATE_LIMIT);
       return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
     }
 
     const config = await getConfig();
     const user = config.UserConfig.Users.find((u) => u.username === username);
     if (user && user.banned) {
+      await recordRateLimitFailure(rateLimitKey, LOGIN_RATE_LIMIT);
       return NextResponse.json({ error: '用户被封禁' }, { status: 401 });
     }
 
@@ -111,6 +146,7 @@ export async function POST(req: NextRequest) {
     try {
       const pass = await db.verifyUser(username, password);
       if (!pass) {
+        await recordRateLimitFailure(rateLimitKey, LOGIN_RATE_LIMIT);
         return NextResponse.json(
           { error: '用户名或密码错误' },
           { status: 401 }
@@ -120,6 +156,7 @@ export async function POST(req: NextRequest) {
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       await setSessionCookie(response, user?.role || 'user', username);
+      await clearRateLimit(rateLimitKey);
 
       return response;
     } catch (err) {
@@ -127,6 +164,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '数据库错误' }, { status: 500 });
     }
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status }
+      );
+    }
     console.error('登录接口异常', error);
     return NextResponse.json({ error: '服务器错误' }, { status: 500 });
   }

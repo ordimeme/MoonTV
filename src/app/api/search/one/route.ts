@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { getCacheTime, getConfig } from '@/lib/config';
+import { getAvailableApiSites, getConfig } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
 import { yellowWords } from '@/lib/yellow';
 
@@ -12,22 +12,28 @@ export async function GET(request: Request) {
   const query = searchParams.get('q');
   const resourceId = searchParams.get('resourceId');
 
+  if (
+    (query && query.length > 100) ||
+    (resourceId && !/^[A-Za-z0-9_-]{1,64}$/.test(resourceId))
+  ) {
+    return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
+  }
+
   if (!query || !resourceId) {
-    const cacheTime = await getCacheTime();
     return NextResponse.json(
       { result: null, error: '缺少必要参数: q 或 resourceId' },
       {
         headers: {
-          'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-          'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
+          'Cache-Control': 'private, no-store',
+          'CDN-Cache-Control': 'no-store',
+          Vary: 'Cookie',
         },
       }
     );
   }
 
   const config = await getConfig();
-  const apiSites = config.SourceConfig.filter((site) => !site.disabled);
+  const apiSites = await getAvailableApiSites();
 
   try {
     // 根据 resourceId 查找对应的 API 站点
@@ -50,8 +56,6 @@ export async function GET(request: Request) {
         return !yellowWords.some((word: string) => typeName.includes(word));
       });
     }
-    const cacheTime = await getCacheTime();
-
     if (result.length === 0) {
       return NextResponse.json(
         {
@@ -65,9 +69,9 @@ export async function GET(request: Request) {
         { results: result },
         {
           headers: {
-            'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-            'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-            'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
+            'Cache-Control': 'private, no-store',
+            'CDN-Cache-Control': 'no-store',
+            Vary: 'Cookie',
           },
         }
       );

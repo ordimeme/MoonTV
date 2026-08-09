@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 
 import { getSafeRedirect } from '@/lib/security';
+import { clearPrivateApiCaches } from '@/lib/session.client';
 import { CURRENT_VERSION } from '@/lib/version';
 
 import { useSite } from '@/components/SiteProvider';
@@ -65,6 +66,7 @@ function LoginPageClient() {
       });
 
       if (res.ok) {
+        await clearPrivateApiCaches();
         const redirect = getSafeRedirect(searchParams.get('redirect'));
         router.replace(redirect);
       } else if (res.status === 401) {
@@ -94,6 +96,7 @@ function LoginPageClient() {
       });
 
       if (res.ok) {
+        await clearPrivateApiCaches();
         const redirect = getSafeRedirect(searchParams.get('redirect'));
         router.replace(redirect);
       } else {

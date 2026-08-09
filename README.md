@@ -86,7 +86,7 @@
 
 1. **Fork** 本仓库到你的 GitHub 账户。
 2. 登陆 [Vercel](https://vercel.com/)，点击 **Add New → Project**，选择 Fork 后的仓库。
-3. 设置 PASSWORD 环境变量。
+3. 设置 PASSWORD，并设置至少 32 位随机值的 SESSION_SECRET 环境变量。
 4. 保持默认设置完成首次部署。
 5. 如需自定义 `config.json`，请直接修改 Fork 后仓库中该文件。
 6. 每次 Push 到 `main` 分支将自动触发重新构建。
@@ -99,7 +99,7 @@
 1. 在 [upstash](https://upstash.com/) 注册账号并新建一个 Redis 实例，名称任意。
 2. 复制新数据库的 **HTTPS ENDPOINT 和 TOKEN**
 3. 返回你的 Vercel 项目，新增环境变量 **UPSTASH_URL 和 UPSTASH_TOKEN**，值为第二步复制的 endpoint 和 token
-4. 设置环境变量 NEXT_PUBLIC_STORAGE_TYPE，值为 **upstash**；设置 USERNAME 和 PASSWORD 作为站长账号
+4. 设置环境变量 NEXT_PUBLIC_STORAGE_TYPE，值为 **upstash**；设置 USERNAME 和 PASSWORD 作为站长账号，并设置至少 32 位随机值的 SESSION_SECRET
 5. 重试部署
 
 ### Cloudflare 部署
@@ -113,7 +113,7 @@
 3. 选择 Pages，导入现有的 Git 存储库，选择 Fork 后的仓库
 4. 构建命令填写 **pnpm install --frozen-lockfile && pnpm run pages:build**，预设框架为无，**构建输出目录**为 `.vercel/output/static`
 5. 保持默认设置完成首次部署。进入设置，将兼容性标志设置为 `nodejs_compat`，无需选择，直接粘贴
-6. 首次部署完成后进入设置，新增 PASSWORD 密钥（变量和机密下），而后重试部署。
+6. 首次部署完成后进入设置，新增 PASSWORD 和 SESSION_SECRET 密钥（变量和机密下）；SESSION_SECRET 必须是至少 32 位的独立随机值，而后重试部署。
 7. 如需自定义 `config.json`，请直接修改 Fork 后仓库中该文件。
 8. 每次 Push 到 `main` 分支将自动触发重新构建。
 
@@ -123,7 +123,7 @@
 1. 点击 **存储和数据库 -> D1 SQL 数据库**，创建一个新的数据库，名称随意
 2. 进入刚创建的数据库，点击左上角的 Explore Data，将[D1 初始化](D1初始化.md) 中的内容粘贴到 Query 窗口后点击 **Run All**，等待运行完成
 3. 返回你的 pages 项目，进入 **设置 -> 绑定**，添加绑定 D1 数据库，选择你刚创建的数据库，变量名称填 **DB**
-4. 设置环境变量 NEXT_PUBLIC_STORAGE_TYPE，值为 **d1**；设置 USERNAME 和 PASSWORD 作为站长账号
+4. 设置环境变量 NEXT_PUBLIC_STORAGE_TYPE，值为 **d1**；设置 USERNAME 和 PASSWORD 作为站长账号，并设置至少 32 位随机值的 SESSION_SECRET
 5. 重试部署
 
 ### Docker 部署
@@ -211,6 +211,7 @@ networks:
 | --------------------------------- | -------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | USERNAME                          | 非 localstorage 部署时的管理员账号           | 任意字符串                       | （空）                                                                                                                     |
 | PASSWORD                          | 非 localstorage 部署时为管理员密码           | 任意字符串                       | （空）                                                                                                                     |
+| SESSION_SECRET                    | 独立的会话签名密钥，至少 32 位随机值         | 随机字符串                       | （空，缺失时拒绝登录）                                                                                                     |
 | SITE_NAME                         | 站点名称                                     | 任意字符串                       | MoonTV                                                                                                                     |
 | ANNOUNCEMENT                      | 站点公告                                     | 任意字符串                       | 本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。 |
 | NEXT_PUBLIC_STORAGE_TYPE          | 播放记录/收藏的存储方式                      | localstorage、redis、d1、upstash | localstorage                                                                                                               |
@@ -232,7 +233,7 @@ networks:
   "cache_time": 7200,
   "api_site": {
     "dyttzy": {
-      "api": "http://caiji.dyttzyapi.com/api.php/provide/vod",
+      "api": "https://caiji.dyttzyapi.com/api.php/provide/vod",
       "name": "电影天堂资源",
       "detail": "http://caiji.dyttzyapi.com"
     }
@@ -304,7 +305,7 @@ MoonTV 支持标准的苹果 CMS V10 API 格式。
 
 ### 部署要求
 
-1. **设置环境变量 `PASSWORD`**：为您的实例设置一个强密码
+1. **设置环境变量 `PASSWORD` 和 `SESSION_SECRET`**：管理员使用强密码；会话密钥使用至少 32 位的独立随机值
 2. **仅供个人使用**：请勿将您的实例链接公开分享或传播
 3. **遵守当地法律**：请确保您的使用行为符合当地法律法规
 

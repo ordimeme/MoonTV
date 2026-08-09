@@ -3,7 +3,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getConfig } from '@/lib/config';
 import { getStorage } from '@/lib/db';
+import {
+  isSafePassword,
+  readLimitedJson,
+  RequestValidationError,
+} from '@/lib/request-security';
 import { IStorage } from '@/lib/types';
 
 export const runtime = 'edge';
@@ -22,18 +28,21 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json();
+    const body = await readLimitedJson<{ newPassword?: unknown }>(request);
     const { newPassword } = body;
 
     // 获取认证信息
-    const authInfo = getAuthInfoFromCookie(request);
+    const authInfo = await getAuthInfoFromCookie(request);
     if (!authInfo || !authInfo.username) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     // 验证新密码
-    if (!newPassword || typeof newPassword !== 'string') {
-      return NextResponse.json({ error: '新密码不得为空' }, { status: 400 });
+    if (!isSafePassword(newPassword)) {
+      return NextResponse.json(
+        { error: '新密码长度须为 10-128 位' },
+        { status: 400 }
+      );
     }
 
     const username = authInfo.username;
@@ -58,8 +67,25 @@ export async function POST(request: NextRequest) {
     // 修改密码
     await storage.changePassword(username, newPassword);
 
-    return NextResponse.json({ ok: true });
+    const config = await getConfig();
+    const user = config.UserConfig.Users.find(
+      (entry) => entry.username === username
+    );
+    if (user) {
+      user.authInvalidBefore = Date.now();
+      await storage.setAdminConfig(config);
+    }
+
+    const response = NextResponse.json({ ok: true });
+    response.cookies.delete('auth');
+    return response;
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status }
+      );
+    }
     console.error('修改密码失败:', error);
     return NextResponse.json(
       {

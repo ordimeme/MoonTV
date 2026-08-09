@@ -740,7 +740,7 @@ const VideoSourceConfig = ({
         setShowAddForm(false);
       })
       .catch(() => {
-        console.error('操作失败', 'add', newSource);
+        console.error('添加视频源失败');
       });
   };
 
@@ -1759,7 +1759,7 @@ function AdminPageClient() {
     if (!isConfirmed) return;
 
     try {
-      const response = await fetch(`/api/admin/reset`);
+      const response = await fetch(`/api/admin/reset`, { method: 'POST' });
       if (!response.ok) {
         throw new Error(`重置失败: ${response.status}`);
       }

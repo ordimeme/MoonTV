@@ -4,6 +4,7 @@ import { webcrypto } from 'node:crypto';
 
 import {
   createSessionToken,
+  getSessionSecret,
   parseSessionToken,
   verifySessionToken,
 } from '../session';
@@ -11,6 +12,16 @@ import {
 Object.defineProperty(globalThis, 'crypto', { value: webcrypto });
 
 describe('signed sessions', () => {
+  it('requires an independent high-entropy session secret', () => {
+    const original = process.env.SESSION_SECRET;
+    process.env.SESSION_SECRET = 'short';
+    expect(getSessionSecret()).toBeNull();
+    process.env.SESSION_SECRET = 'x'.repeat(32);
+    expect(getSessionSecret()).toBe('x'.repeat(32));
+    if (original === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = original;
+  });
+
   it('verifies a valid unexpired session', async () => {
     const token = await createSessionToken(
       'test-secret',
@@ -36,7 +47,7 @@ describe('signed sessions', () => {
       verifySessionToken(`${token}x`, 'test-secret', 2_000)
     ).resolves.toBeNull();
     await expect(
-      verifySessionToken(token, 'test-secret', 8 * 24 * 60 * 60 * 1000)
+      verifySessionToken(token, 'test-secret', 25 * 60 * 60 * 1000)
     ).resolves.toBeNull();
     expect(parseSessionToken('not-a-token')).toBeNull();
   });

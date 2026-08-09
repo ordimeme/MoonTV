@@ -1,5 +1,9 @@
 import { API_CONFIG, ApiSite, getConfig } from '@/lib/config';
 import { SearchResult } from '@/lib/types';
+import {
+  isSafeUpstreamUrl,
+  readJsonResponseLimited,
+} from '@/lib/upstream-security';
 import { cleanHtmlTags } from '@/lib/utils';
 
 interface ApiSearchItem {
@@ -15,12 +19,18 @@ interface ApiSearchItem {
   type_name?: string;
 }
 
+interface ApiResponse {
+  list?: ApiSearchItem[];
+  pagecount?: number;
+}
+
 export async function searchFromApi(
   apiSite: ApiSite,
   query: string
 ): Promise<SearchResult[]> {
   try {
     const apiBaseUrl = apiSite.api;
+    if (!isSafeUpstreamUrl(apiBaseUrl)) return [];
     const apiUrl =
       apiBaseUrl + API_CONFIG.search.path + encodeURIComponent(query);
     const apiName = apiSite.name;
@@ -40,7 +50,7 @@ export async function searchFromApi(
       return [];
     }
 
-    const data = await response.json();
+    const data = await readJsonResponseLimited<ApiResponse>(response);
     if (
       !data ||
       !data.list ||
@@ -91,7 +101,10 @@ export async function searchFromApi(
     });
 
     const config = await getConfig();
-    const MAX_SEARCH_PAGES: number = config.SiteConfig.SearchDownstreamMaxPage;
+    const MAX_SEARCH_PAGES = Math.max(
+      1,
+      Math.min(10, Number(config.SiteConfig.SearchDownstreamMaxPage) || 1)
+    );
 
     // 获取总页数
     const pageCount = data.pagecount || 1;
@@ -126,7 +139,9 @@ export async function searchFromApi(
 
             if (!pageResponse.ok) return [];
 
-            const pageData = await pageResponse.json();
+            const pageData = await readJsonResponseLimited<ApiResponse>(
+              pageResponse
+            );
 
             if (!pageData || !pageData.list || !Array.isArray(pageData.list))
               return [];
@@ -194,6 +209,12 @@ export async function getDetailFromApi(
   apiSite: ApiSite,
   id: string
 ): Promise<SearchResult> {
+  if (!isSafeUpstreamUrl(apiSite.api)) {
+    throw new Error('无效的视频源地址');
+  }
+  if (apiSite.detail && !isSafeUpstreamUrl(apiSite.detail)) {
+    throw new Error('无效的视频详情地址');
+  }
   if (apiSite.detail) {
     return handleSpecialSourceDetail(id, apiSite);
   }
@@ -214,7 +235,7 @@ export async function getDetailFromApi(
     throw new Error(`详情请求失败: ${response.status}`);
   }
 
-  const data = await response.json();
+  const data = await readJsonResponseLimited<ApiResponse>(response);
 
   if (
     !data ||
@@ -263,7 +284,7 @@ export async function getDetailFromApi(
     year: videoDetail.vod_year
       ? videoDetail.vod_year.match(/\d{4}/)?.[0] || ''
       : 'unknown',
-    desc: cleanHtmlTags(videoDetail.vod_content),
+    desc: cleanHtmlTags(videoDetail.vod_content || ''),
     type_name: videoDetail.type_name,
     douban_id: videoDetail.vod_douban_id,
   };

@@ -13,25 +13,6 @@ const nextConfig = {
         source: '/:path*',
         headers: [
           {
-            key: 'Content-Security-Policy',
-            value: [
-              "default-src 'self'",
-              "base-uri 'self'",
-              "object-src 'none'",
-              "frame-ancestors 'none'",
-              "form-action 'self'",
-              "script-src 'self' 'unsafe-inline'",
-              "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: blob: https:",
-              "media-src 'self' blob: https:",
-              "connect-src 'self' https:",
-              "font-src 'self' data:",
-              "worker-src 'self' blob:",
-              "manifest-src 'self'",
-              'upgrade-insecure-requests',
-            ].join('; '),
-          },
-          {
             key: 'Strict-Transport-Security',
             value: 'max-age=31536000; includeSubDomains',
           },
@@ -99,11 +80,21 @@ const nextConfig = {
   },
 };
 
+const defaultRuntimeCaching = require('next-pwa/cache');
 const withPWA = require('next-pwa')({
   dest: 'public',
   disable: process.env.NODE_ENV === 'development',
   register: true,
   skipWaiting: true,
+  runtimeCaching: [
+    {
+      urlPattern: /\/api\//,
+      handler: 'NetworkOnly',
+      method: 'GET',
+      options: { cacheName: 'private-api-network-only' },
+    },
+    ...defaultRuntimeCaching,
+  ],
 });
 
 module.exports = withPWA(nextConfig);

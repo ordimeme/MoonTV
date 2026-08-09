@@ -1,20 +1,24 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-import { getAvailableApiSites, getCacheTime } from '@/lib/config';
+import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getAvailableApiSites } from '@/lib/config';
 
 export const runtime = 'edge';
 
 // OrionTV 兼容接口
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const auth = await getAuthInfoFromCookie(request);
+    if (auth?.role !== 'owner') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
     const apiSites = await getAvailableApiSites();
-    const cacheTime = await getCacheTime();
 
     return NextResponse.json(apiSites, {
       headers: {
-        'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-        'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-        'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
+        'Cache-Control': 'private, no-store',
+        'CDN-Cache-Control': 'no-store',
+        Vary: 'Cookie',
       },
     });
   } catch (error) {

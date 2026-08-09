@@ -5,7 +5,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
 import { getStorage } from '@/lib/db';
+import {
+  readLimitedJson,
+  RequestValidationError,
+} from '@/lib/request-security';
 import { IStorage } from '@/lib/types';
+import { isSafeUpstreamUrl } from '@/lib/upstream-security';
 
 export const runtime = 'edge';
 
@@ -28,10 +33,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = (await request.json()) as BaseBody & Record<string, any>;
+    const body = await readLimitedJson<BaseBody & Record<string, any>>(
+      request,
+      16 * 1024
+    );
     const { action } = body;
 
-    const authInfo = getAuthInfoFromCookie(request);
+    const authInfo = await getAuthInfoFromCookie(request);
     if (!authInfo || !authInfo.username) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -67,6 +75,18 @@ export async function POST(request: NextRequest) {
         };
         if (!key || !name || !api) {
           return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
+        }
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(key) || name.length > 100) {
+          return NextResponse.json(
+            { error: '视频源名称或 key 格式错误' },
+            { status: 400 }
+          );
+        }
+        if (!isSafeUpstreamUrl(api) || (detail && !isSafeUpstreamUrl(detail))) {
+          return NextResponse.json(
+            { error: '仅允许无凭据、无查询参数的公网 HTTPS 视频源' },
+            { status: 400 }
+          );
         }
         if (adminConfig.SourceConfig.some((s) => s.key === key)) {
           return NextResponse.json({ error: '该源已存在' }, { status: 400 });
@@ -157,6 +177,12 @@ export async function POST(request: NextRequest) {
       }
     );
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status }
+      );
+    }
     console.error('视频源管理操作失败:', error);
     return NextResponse.json(
       {

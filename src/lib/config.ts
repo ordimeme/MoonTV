@@ -4,6 +4,7 @@ import { getStorage } from '@/lib/db';
 
 import { AdminConfig } from './admin.types';
 import runtimeConfig from './runtime';
+import { isSafeUpstreamUrl } from './upstream-security';
 
 export interface ApiSite {
   key: string;
@@ -485,7 +486,12 @@ export async function getCacheTime(): Promise<number> {
 
 export async function getAvailableApiSites(): Promise<ApiSite[]> {
   const config = await getConfig();
-  return config.SourceConfig.filter((s) => !s.disabled).map((s) => ({
+  return config.SourceConfig.filter(
+    (s) =>
+      !s.disabled &&
+      isSafeUpstreamUrl(s.api) &&
+      (!s.detail || isSafeUpstreamUrl(s.detail))
+  ).map((s) => ({
     key: s.key,
     name: s.name,
     api: s.api,

@@ -2,60 +2,61 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { verifySessionToken } from '@/lib/session';
+import { getAuthInfoFromCookie } from '@/lib/auth';
+import { isSameOriginMutation } from '@/lib/request-security';
+import { getSessionSecret } from '@/lib/session';
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (pathname.startsWith('/api/') && !isSameOriginMutation(request)) {
+    return withSecurityHeaders(
+      NextResponse.json(
+        { error: 'Cross-site request blocked' },
+        { status: 403 }
+      )
+    );
+  }
 
   // 跳过不需要认证的路径
   if (shouldSkipAuth(pathname)) {
     return withSecurityHeaders(NextResponse.next());
   }
 
-  const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
-
-  if (!process.env.PASSWORD) {
+  if (!getSessionSecret()) {
     // 如果没有设置密码，重定向到警告页面
     const warningUrl = new URL('/warning', request.url);
     return withSecurityHeaders(NextResponse.redirect(warningUrl));
   }
 
-  const token = request.cookies.get('auth')?.value;
-  if (!token) {
-    return handleAuthFailure(request, pathname);
-  }
-  const session = await verifySessionToken(token, process.env.PASSWORD);
-  const expectedMode =
-    storageType === 'localstorage' ? 'localstorage' : 'database';
-  if (!session || session.mode !== expectedMode) {
-    return handleAuthFailure(request, pathname);
-  }
-  if (expectedMode === 'database' && !session.username) {
+  const session = await getAuthInfoFromCookie(request);
+  if (!session) {
     return handleAuthFailure(request, pathname);
   }
   return withSecurityHeaders(NextResponse.next());
 }
 
+function buildCsp(): string {
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "media-src 'self' blob: https:",
+    "connect-src 'self' https:",
+    "font-src 'self' data:",
+    "worker-src 'self' blob:",
+    "manifest-src 'self'",
+    'upgrade-insecure-requests',
+  ].join('; ');
+}
+
 function withSecurityHeaders(response: NextResponse): NextResponse {
-  response.headers.set(
-    'Content-Security-Policy',
-    [
-      "default-src 'self'",
-      "base-uri 'self'",
-      "object-src 'none'",
-      "frame-ancestors 'none'",
-      "form-action 'self'",
-      "script-src 'self' 'unsafe-inline'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob: https:",
-      "media-src 'self' blob: https:",
-      "connect-src 'self' https:",
-      "font-src 'self' data:",
-      "worker-src 'self' blob:",
-      "manifest-src 'self'",
-      'upgrade-insecure-requests',
-    ].join('; ')
-  );
+  response.headers.set('Content-Security-Policy', buildCsp());
   response.headers.set(
     'Strict-Transport-Security',
     'max-age=31536000; includeSubDomains'
@@ -108,6 +109,9 @@ function shouldSkipAuth(pathname: string): boolean {
     '/favicon.ico',
     '/robots.txt',
     '/manifest.json',
+    '/sw.js',
+    '/workbox-',
+    '/worker-',
     '/icons/',
     '/logo.png',
     '/screenshot.png',

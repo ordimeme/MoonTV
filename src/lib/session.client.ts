@@ -36,3 +36,14 @@ export function clearCachedSession(): void {
   if (typeof window !== 'undefined')
     sessionStorage.removeItem(SESSION_CACHE_KEY);
 }
+
+export async function clearPrivateApiCaches(): Promise<void> {
+  clearCachedSession();
+  if (typeof window === 'undefined' || !('caches' in window)) return;
+  const cacheNames = await window.caches.keys();
+  await Promise.all(
+    cacheNames
+      .filter((name) => name === 'apis' || name === 'private-api-network-only')
+      .map((name) => window.caches.delete(name))
+  );
+}

@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { clearCachedSession, fetchSession } from '@/lib/session.client';
+import { clearPrivateApiCaches, fetchSession } from '@/lib/session.client';
 import { CURRENT_VERSION } from '@/lib/version';
 
 interface AuthInfo {
@@ -121,7 +121,7 @@ export const UserMenu: React.FC = () => {
     } catch (error) {
       console.error('注销请求失败:', error);
     }
-    clearCachedSession();
+    await clearPrivateApiCaches();
     window.location.href = '/';
   };
 

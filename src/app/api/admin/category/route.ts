@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
 import { getStorage } from '@/lib/db';
+import { readLimitedJson } from '@/lib/request-security';
 import { IStorage } from '@/lib/types';
 
 export const runtime = 'edge';
@@ -36,10 +37,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = (await request.json()) as BaseBody & Record<string, any>;
+    const body = await readLimitedJson<BaseBody & Record<string, any>>(
+      request,
+      16 * 1024
+    );
     const { action } = body;
 
-    const authInfo = getAuthInfoFromCookie(request);
+    const authInfo = await getAuthInfoFromCookie(request);
     if (!authInfo || !authInfo.username) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -74,6 +78,9 @@ export async function POST(request: NextRequest) {
         };
         if (!name || !type || !query) {
           return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
+        }
+        if (name.length > 100 || query.length > 100) {
+          return NextResponse.json({ error: '分类参数过长' }, { status: 400 });
         }
         // 检查是否已存在相同的查询和类型组合
         if (

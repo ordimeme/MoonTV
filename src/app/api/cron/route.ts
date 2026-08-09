@@ -2,9 +2,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getAuthInfoFromCookie } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { fetchVideoDetail } from '@/lib/fetchVideoDetail';
-import { verifySessionToken } from '@/lib/session';
 import { SearchResult } from '@/lib/types';
 
 export const runtime = 'edge';
@@ -42,10 +42,7 @@ async function isAuthorized(request: NextRequest): Promise<boolean> {
   const authorization = request.headers.get('authorization');
   if (cronSecret && authorization === `Bearer ${cronSecret}`) return true;
 
-  const sessionSecret = process.env.PASSWORD;
-  const token = request.cookies.get('auth')?.value;
-  if (!sessionSecret || !token) return false;
-  const session = await verifySessionToken(token, sessionSecret);
+  const session = await getAuthInfoFromCookie(request);
   return session?.role === 'owner';
 }
 

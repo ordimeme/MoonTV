@@ -8,7 +8,13 @@ export interface SessionPayload {
   expiresAt: number;
 }
 
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const MIN_SESSION_SECRET_LENGTH = 32;
+
+export function getSessionSecret(): string | null {
+  const secret = process.env.SESSION_SECRET?.trim() || '';
+  return secret.length >= MIN_SESSION_SECRET_LENGTH ? secret : null;
+}
 
 function toBase64Url(bytes: Uint8Array): string {
   let binary = '';

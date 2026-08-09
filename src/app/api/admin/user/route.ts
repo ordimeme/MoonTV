@@ -5,6 +5,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
 import { getStorage } from '@/lib/db';
+import {
+  isSafePassword,
+  isSafeUsername,
+  readLimitedJson,
+  RequestValidationError,
+} from '@/lib/request-security';
 import { IStorage } from '@/lib/types';
 
 export const runtime = 'edge';
@@ -33,9 +39,9 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json();
+    const body = await readLimitedJson<Record<string, unknown>>(request);
 
-    const authInfo = getAuthInfoFromCookie(request);
+    const authInfo = await getAuthInfoFromCookie(request);
     if (!authInfo || !authInfo.username) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -59,6 +65,12 @@ export async function POST(request: NextRequest) {
 
     if (action !== 'setAllowRegister' && !targetUsername) {
       return NextResponse.json({ error: '缺少目标用户名' }, { status: 400 });
+    }
+    if (action !== 'setAllowRegister' && !isSafeUsername(targetUsername)) {
+      return NextResponse.json(
+        { error: '目标用户名格式错误' },
+        { status: 400 }
+      );
     }
 
     if (
@@ -119,9 +131,9 @@ export async function POST(request: NextRequest) {
           if (targetEntry) {
             return NextResponse.json({ error: '用户已存在' }, { status: 400 });
           }
-          if (!targetPassword) {
+          if (!isSafePassword(targetPassword)) {
             return NextResponse.json(
-              { error: '缺少目标用户密码' },
+              { error: '目标用户密码长度须为 10-128 位' },
               { status: 400 }
             );
           }
@@ -160,6 +172,7 @@ export async function POST(request: NextRequest) {
             }
           }
           targetEntry.banned = true;
+          targetEntry.authInvalidBefore = Date.now();
           break;
         }
         case 'unban': {
@@ -178,6 +191,7 @@ export async function POST(request: NextRequest) {
             }
           }
           targetEntry.banned = false;
+          targetEntry.authInvalidBefore = Date.now();
           break;
         }
         case 'setAdmin': {
@@ -200,6 +214,7 @@ export async function POST(request: NextRequest) {
             );
           }
           targetEntry.role = 'admin';
+          targetEntry.authInvalidBefore = Date.now();
           break;
         }
         case 'cancelAdmin': {
@@ -222,6 +237,7 @@ export async function POST(request: NextRequest) {
             );
           }
           targetEntry.role = 'user';
+          targetEntry.authInvalidBefore = Date.now();
           break;
         }
         case 'changePassword': {
@@ -231,8 +247,11 @@ export async function POST(request: NextRequest) {
               { status: 404 }
             );
           }
-          if (!targetPassword) {
-            return NextResponse.json({ error: '缺少新密码' }, { status: 400 });
+          if (!isSafePassword(targetPassword)) {
+            return NextResponse.json(
+              { error: '新密码长度须为 10-128 位' },
+              { status: 400 }
+            );
           }
 
           // 权限检查：不允许修改站长密码
@@ -262,6 +281,7 @@ export async function POST(request: NextRequest) {
           }
 
           await storage.changePassword(targetUsername!, targetPassword);
+          targetEntry.authInvalidBefore = Date.now();
           break;
         }
         case 'deleteUser': {
@@ -325,6 +345,12 @@ export async function POST(request: NextRequest) {
       }
     );
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.status }
+      );
+    }
     console.error('用户管理操作失败:', error);
     return NextResponse.json(
       {

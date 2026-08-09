@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { getCacheTime, getConfig } from '@/lib/config';
+import { getAvailableApiSites, getCacheTime, getConfig } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
 import { yellowWords } from '@/lib/yellow';
 
@@ -10,22 +10,26 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get('q');
 
+  if (query && query.length > 100) {
+    return NextResponse.json({ error: '搜索词过长' }, { status: 400 });
+  }
+
   if (!query) {
-    const cacheTime = await getCacheTime();
+    await getCacheTime();
     return NextResponse.json(
       { results: [] },
       {
         headers: {
-          'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-          'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
+          'Cache-Control': 'private, no-store',
+          'CDN-Cache-Control': 'no-store',
+          Vary: 'Cookie',
         },
       }
     );
   }
 
   const config = await getConfig();
-  const apiSites = config.SourceConfig.filter((site) => !site.disabled);
+  const apiSites = await getAvailableApiSites();
   const searchPromises = apiSites.map((site) => searchFromApi(site, query));
 
   try {
@@ -37,15 +41,15 @@ export async function GET(request: Request) {
         return !yellowWords.some((word: string) => typeName.includes(word));
       });
     }
-    const cacheTime = await getCacheTime();
+    await getCacheTime();
 
     return NextResponse.json(
       { results: flattenedResults },
       {
         headers: {
-          'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-          'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-          'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
+          'Cache-Control': 'private, no-store',
+          'CDN-Cache-Control': 'no-store',
+          Vary: 'Cookie',
         },
       }
     );

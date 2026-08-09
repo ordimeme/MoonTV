@@ -4,6 +4,14 @@ export const runtime = 'edge';
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
+const ALLOWED_IMAGE_HOST_SUFFIXES = ['douban.com', 'doubanio.com'];
+
+function isAllowedImageHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  return ALLOWED_IMAGE_HOST_SUFFIXES.some(
+    (suffix) => host === suffix || host.endsWith(`.${suffix}`)
+  );
+}
 
 function isBlockedHostname(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
@@ -41,6 +49,7 @@ function validateImageUrl(value: string): URL | null {
       url.protocol !== 'https:' ||
       url.username ||
       url.password ||
+      !isAllowedImageHostname(url.hostname) ||
       isBlockedHostname(url.hostname)
     ) {
       return null;

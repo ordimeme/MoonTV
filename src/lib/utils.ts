@@ -37,6 +37,21 @@ export function processImageUrl(originalUrl: string): string {
   const proxyUrl = getImageProxyUrl();
   if (!proxyUrl) return originalUrl;
 
+  if (proxyUrl.includes('/api/image-proxy')) {
+    try {
+      const hostname = new URL(originalUrl).hostname.toLowerCase();
+      if (
+        !['douban.com', 'doubanio.com'].some(
+          (suffix) => hostname === suffix || hostname.endsWith(`.${suffix}`)
+        )
+      ) {
+        return originalUrl;
+      }
+    } catch {
+      return originalUrl;
+    }
+  }
+
   return `${proxyUrl}${encodeURIComponent(originalUrl)}`;
 }
 

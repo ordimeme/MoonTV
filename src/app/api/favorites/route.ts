@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { readLimitedJson } from '@/lib/request-security';
 import { Favorite } from '@/lib/types';
 
 export const runtime = 'edge';
@@ -18,7 +19,7 @@ export const runtime = 'edge';
 export async function GET(request: NextRequest) {
   try {
     // 从 cookie 获取用户信息
-    const authInfo = getAuthInfoFromCookie(request);
+    const authInfo = await getAuthInfoFromCookie(request);
     if (!authInfo || !authInfo.username) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -58,13 +59,16 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     // 从 cookie 获取用户信息
-    const authInfo = getAuthInfoFromCookie(request);
+    const authInfo = await getAuthInfoFromCookie(request);
     if (!authInfo || !authInfo.username) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { key, favorite }: { key: string; favorite: Favorite } = body;
+    const body = await readLimitedJson<{
+      key?: string;
+      favorite?: Favorite;
+    }>(request, 32 * 1024);
+    const { key, favorite } = body;
 
     if (!key || !favorite) {
       return NextResponse.json(
@@ -115,7 +119,7 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     // 从 cookie 获取用户信息
-    const authInfo = getAuthInfoFromCookie(request);
+    const authInfo = await getAuthInfoFromCookie(request);
     if (!authInfo || !authInfo.username) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

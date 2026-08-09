@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
   }
 
-  if (!/^[\w-]+$/.test(id)) {
+  if (id.length > 128 || sourceCode.length > 64 || !/^[\w-]+$/.test(id)) {
     return NextResponse.json({ error: '无效的视频ID格式' }, { status: 400 });
   }
 
@@ -27,13 +27,13 @@ export async function GET(request: Request) {
     }
 
     const result = await getDetailFromApi(apiSite, id);
-    const cacheTime = await getCacheTime();
+    await getCacheTime();
 
     return NextResponse.json(result, {
       headers: {
-        'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
-        'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
-        'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
+        'Cache-Control': 'private, no-store',
+        'CDN-Cache-Control': 'no-store',
+        Vary: 'Cookie',
       },
     });
   } catch (error) {
