@@ -4,16 +4,19 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { db } from '@/lib/db';
 import { fetchVideoDetail } from '@/lib/fetchVideoDetail';
+import { verifySessionToken } from '@/lib/session';
 import { SearchResult } from '@/lib/types';
 
 export const runtime = 'edge';
 
 export async function GET(request: NextRequest) {
-  console.log(request.url);
   try {
+    if (!(await isAuthorized(request))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     console.log('Cron job triggered:', new Date().toISOString());
 
-    refreshRecordAndFavorites();
+    await refreshRecordAndFavorites();
 
     return NextResponse.json({
       success: true,
@@ -27,12 +30,23 @@ export async function GET(request: NextRequest) {
       {
         success: false,
         message: 'Cron job failed',
-        error: error instanceof Error ? error.message : 'Unknown error',
         timestamp: new Date().toISOString(),
       },
       { status: 500 }
     );
   }
+}
+
+async function isAuthorized(request: NextRequest): Promise<boolean> {
+  const cronSecret = process.env.CRON_SECRET;
+  const authorization = request.headers.get('authorization');
+  if (cronSecret && authorization === `Bearer ${cronSecret}`) return true;
+
+  const sessionSecret = process.env.PASSWORD;
+  const token = request.cookies.get('auth')?.value;
+  if (!sessionSecret || !token) return false;
+  const session = await verifySessionToken(token, sessionSecret);
+  return session?.role === 'owner';
 }
 
 async function refreshRecordAndFavorites() {

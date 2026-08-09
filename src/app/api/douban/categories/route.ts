@@ -124,10 +124,7 @@ export async function GET(request: Request) {
         'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
       },
     });
-  } catch (error) {
-    return NextResponse.json(
-      { error: '获取豆瓣数据失败', details: (error as Error).message },
-      { status: 500 }
-    );
+  } catch {
+    return NextResponse.json({ error: '获取豆瓣数据失败' }, { status: 500 });
   }
 }

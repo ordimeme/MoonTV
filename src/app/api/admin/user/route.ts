@@ -329,7 +329,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: '用户管理操作失败',
-        details: (error as Error).message,
       },
       { status: 500 }
     );

@@ -14,7 +14,7 @@
  * 如后续需要在客户端读取收藏等其它数据，可按同样方式在此文件中补充实现。
  */
 
-import { getAuthInfoFromBrowserCookie } from './auth';
+import { getCachedSession } from './session.client';
 import { SkipConfig } from './types';
 
 // 全局错误触发函数
@@ -111,7 +111,7 @@ class HybridCacheManager {
    * 获取当前用户名
    */
   private getCurrentUsername(): string | null {
-    const authInfo = getAuthInfoFromBrowserCookie();
+    const authInfo = getCachedSession();
     return authInfo?.username || null;
   }
 
@@ -1265,7 +1265,7 @@ export function getCacheStatus(): {
     };
   }
 
-  const authInfo = getAuthInfoFromBrowserCookie();
+  const authInfo = getCachedSession();
   return {
     hasPlayRecords: !!cacheManager.getCachedPlayRecords(),
     hasFavorites: !!cacheManager.getCachedFavorites(),

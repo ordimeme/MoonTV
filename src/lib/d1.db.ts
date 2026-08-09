@@ -1,6 +1,7 @@
 /* eslint-disable no-console, @typescript-eslint/no-explicit-any, @typescript-eslint/no-non-null-assertion */
 
 import { AdminConfig } from './admin.types';
+import { hashPassword, isPasswordHash, verifyStoredPassword } from './password';
 import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
 
 // 搜索历史最大条数
@@ -275,9 +276,10 @@ export class D1Storage implements IStorage {
   async registerUser(userName: string, password: string): Promise<void> {
     try {
       const db = await this.getDatabase();
+      const passwordHash = await hashPassword(password);
       await db
         .prepare('INSERT INTO users (username, password) VALUES (?, ?)')
-        .bind(userName, password)
+        .bind(userName, passwordHash)
         .run();
     } catch (err) {
       console.error('Failed to register user:', err);
@@ -293,7 +295,15 @@ export class D1Storage implements IStorage {
         .bind(userName)
         .first<{ password: string }>();
 
-      return result?.password === password;
+      if (!result?.password) return false;
+      const valid = await verifyStoredPassword(password, result.password);
+      if (valid && !isPasswordHash(result.password)) {
+        await db
+          .prepare('UPDATE users SET password = ? WHERE username = ?')
+          .bind(await hashPassword(password), userName)
+          .run();
+      }
+      return valid;
     } catch (err) {
       console.error('Failed to verify user:', err);
       throw err;
@@ -320,7 +330,7 @@ export class D1Storage implements IStorage {
       const db = await this.getDatabase();
       await db
         .prepare('UPDATE users SET password = ? WHERE username = ?')
-        .bind(newPassword, userName)
+        .bind(await hashPassword(newPassword), userName)
         .run();
     } catch (err) {
       console.error('Failed to change password:', err);

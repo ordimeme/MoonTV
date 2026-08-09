@@ -34,7 +34,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import Swal from 'sweetalert2';
 
 import { AdminConfig, AdminConfigResult } from '@/lib/admin.types';
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
+import { fetchSession } from '@/lib/session.client';
 
 import PageLayout from '@/components/PageLayout';
 
@@ -142,7 +142,13 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
   });
 
   // 当前登录用户名
-  const currentUsername = getAuthInfoFromBrowserCookie()?.username || null;
+  const [currentUsername, setCurrentUsername] = useState<string | null>(null);
+
+  useEffect(() => {
+    void fetchSession().then((session) =>
+      setCurrentUsername(session?.username || null)
+    );
+  }, []);
 
   // 检测存储类型是否为 d1
   const isD1Storage =
