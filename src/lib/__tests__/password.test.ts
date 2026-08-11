@@ -14,6 +14,7 @@ describe('password storage', () => {
   it('hashes and verifies passwords without retaining plaintext', async () => {
     const hash = await hashPassword('correct horse battery staple');
     expect(isPasswordHash(hash)).toBe(true);
+    expect(hash.split('$')[1]).toBe('100000');
     expect(hash).not.toContain('correct horse battery staple');
     await expect(
       verifyStoredPassword('correct horse battery staple', hash)

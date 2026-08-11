@@ -1,5 +1,7 @@
 const PREFIX = 'pbkdf2-sha256';
-const ITERATIONS = 310_000;
+// Keep password hashing within the Cloudflare Pages Functions CPU budget.
+// Verification still accepts existing hashes with higher iteration counts.
+const ITERATIONS = 100_000;
 const SALT_BYTES = 16;
 const KEY_BYTES = 32;
 
