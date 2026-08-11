@@ -4,6 +4,15 @@
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-08-11",
   "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "moonvideo.ccwu.cc/*",
+      "zone_name": "ccwu.cc"
+    }
+  ],
+  "vars": {
+    "NEXT_PUBLIC_STORAGE_TYPE": "d1"
+  },
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
