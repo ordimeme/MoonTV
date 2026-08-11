@@ -7,7 +7,11 @@ import {
   readLimitedJson,
   RequestValidationError,
 } from '../request-security';
-import { getSafeRedirect, serializeForInlineScript } from '../security';
+import {
+  buildContentSecurityPolicy,
+  getSafeRedirect,
+  serializeForInlineScript,
+} from '../security';
 import {
   isSafeUpstreamUrl,
   readJsonResponseLimited,
@@ -63,6 +67,11 @@ describe('security helpers', () => {
     expect(serialized).toContain('\\u003c/script\\u003e\\u0026');
   });
 
+  it('allows eval only for the local development bundle', () => {
+    expect(buildContentSecurityPolicy(true)).toContain("'unsafe-eval'");
+    expect(buildContentSecurityPolicy(false)).not.toContain("'unsafe-eval'");
+  });
+
   it('limits and validates JSON request bodies', async () => {
     const request = requestWithBody(JSON.stringify({ ok: true }));
     await expect(readLimitedJson(request, 64)).resolves.toEqual({ ok: true });
@@ -85,6 +94,32 @@ describe('security helpers', () => {
     expect(isSafeUsername('../owner')).toBe(false);
     expect(isSafePassword('long-enough-password')).toBe(true);
     expect(isSafePassword('short')).toBe(false);
+  });
+
+  it('accepts localhost mutations when Next.js binds to 0.0.0.0', () => {
+    expect(
+      isSameOriginMutation({
+        method: 'POST',
+        url: 'http://0.0.0.0:3000/api/login',
+        headers: headers({
+          host: 'localhost:3000',
+          origin: 'http://localhost:3000',
+          'sec-fetch-site': 'same-origin',
+        }),
+      } as Request)
+    ).toBe(true);
+
+    expect(
+      isSameOriginMutation({
+        method: 'POST',
+        url: 'http://0.0.0.0:3000/api/login',
+        headers: headers({
+          host: 'localhost:3000',
+          origin: 'https://evil.example',
+          'sec-fetch-site': 'cross-site',
+        }),
+      } as Request)
+    ).toBe(false);
   });
 
   it('allows only credential-free public HTTPS upstream URLs', () => {

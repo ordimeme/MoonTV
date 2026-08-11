@@ -52,7 +52,14 @@ function LoginPageClient() {
     e.preventDefault();
     setError(null);
 
-    if (!password || (shouldAskUsername && !username)) return;
+    if (!password) {
+      setError('请输入密码');
+      return;
+    }
+    if (shouldAskUsername && !username) {
+      setError('请输入用户名');
+      return;
+    }
 
     try {
       setLoading(true);
@@ -111,8 +118,8 @@ function LoginPageClient() {
   };
 
   return (
-    <div className='relative min-h-screen flex items-center justify-center px-4 overflow-hidden'>
-      <div className='absolute top-4 right-4'>
+    <div className='app-mobile-safe-screen relative min-h-screen flex items-center justify-center px-4 overflow-hidden'>
+      <div className='app-mobile-safe-top-control absolute top-4 right-4'>
         <ThemeToggle />
       </div>
       <div className='relative z-10 w-full max-w-md rounded-3xl bg-gradient-to-b from-white/90 via-white/70 to-white/40 dark:from-zinc-900/90 dark:via-zinc-900/70 dark:to-zinc-900/40 backdrop-blur-xl shadow-2xl p-10 dark:border dark:border-zinc-800'>
@@ -169,9 +176,7 @@ function LoginPageClient() {
               </button>
               <button
                 type='submit'
-                disabled={
-                  !password || loading || (shouldAskUsername && !username)
-                }
+                disabled={loading}
                 className='flex-1 inline-flex justify-center rounded-lg bg-green-600 py-3 text-base font-semibold text-white shadow-lg transition-all duration-200 hover:from-green-600 hover:to-blue-600 disabled:cursor-not-allowed disabled:opacity-50'
               >
                 {loading ? '登录中...' : '登录'}
@@ -180,9 +185,7 @@ function LoginPageClient() {
           ) : (
             <button
               type='submit'
-              disabled={
-                !password || loading || (shouldAskUsername && !username)
-              }
+              disabled={loading}
               className='inline-flex w-full justify-center rounded-lg bg-green-600 py-3 text-base font-semibold text-white shadow-lg transition-all duration-200 hover:from-green-600 hover:to-blue-600 disabled:cursor-not-allowed disabled:opacity-50'
             >
               {loading ? '登录中...' : '登录'}

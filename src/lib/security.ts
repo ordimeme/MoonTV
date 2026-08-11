@@ -11,3 +11,28 @@ export function serializeForInlineScript(value: unknown): string {
     .replace(/\u2028/g, '\\u2028')
     .replace(/\u2029/g, '\\u2029');
 }
+
+export function buildContentSecurityPolicy(isDevelopment: boolean): string {
+  const scriptSources = ["'self'", "'unsafe-inline'"];
+  if (isDevelopment) {
+    // Next.js React Refresh uses eval in the local development bundle.
+    scriptSources.push("'unsafe-eval'");
+  }
+
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    `script-src ${scriptSources.join(' ')}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "media-src 'self' blob: https:",
+    "connect-src 'self' https:",
+    "font-src 'self' data:",
+    "worker-src 'self' blob:",
+    "manifest-src 'self'",
+    'upgrade-insecure-requests',
+  ].join('; ');
+}

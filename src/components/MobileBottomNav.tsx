@@ -69,15 +69,7 @@ const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
   };
 
   return (
-    <nav
-      className='md:hidden fixed left-0 right-0 z-[600] bg-white/90 backdrop-blur-xl border-t border-gray-200/50 overflow-hidden dark:bg-gray-900/80 dark:border-gray-700/50'
-      style={{
-        /* 紧贴视口底部，同时在内部留出安全区高度 */
-        bottom: 0,
-        paddingBottom: 'env(safe-area-inset-bottom)',
-        minHeight: 'calc(3.5rem + env(safe-area-inset-bottom))',
-      }}
-    >
+    <nav className='app-mobile-bottom-nav md:hidden fixed left-0 right-0 z-[600] bg-white/90 backdrop-blur-xl border-t border-gray-200/50 overflow-hidden dark:bg-gray-900/80 dark:border-gray-700/50'>
       <ul className='flex items-center overflow-x-auto scrollbar-hide'>
         {navItems.map((item) => {
           const active = isActive(item.href);
@@ -89,10 +81,10 @@ const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
             >
               <Link
                 href={item.href}
-                className='flex flex-col items-center justify-center w-full h-14 gap-1 text-xs'
+                className='app-mobile-nav-link flex flex-col items-center justify-center w-full'
               >
                 <item.icon
-                  className={`h-6 w-6 ${
+                  className={`app-mobile-nav-icon ${
                     active
                       ? 'text-green-600 dark:text-green-400'
                       : 'text-gray-500 dark:text-gray-400'

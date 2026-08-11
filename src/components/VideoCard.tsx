@@ -283,7 +283,7 @@ export default function VideoCard({
           fill
           className='object-cover'
           referrerPolicy='no-referrer'
-          onLoadingComplete={() => setIsLoading(true)}
+          onLoad={() => setIsLoading(true)}
         />
 
         {/* 悬浮遮罩 */}

@@ -69,8 +69,31 @@ export function isSameOriginMutation(request: Request): boolean {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS')
     return true;
 
-  const requestOrigin = new URL(request.url).origin;
+  if (request.headers.get('sec-fetch-site') === 'cross-site') return false;
+
   const origin = request.headers.get('origin');
-  if (origin && origin !== requestOrigin) return false;
-  return request.headers.get('sec-fetch-site') !== 'cross-site';
+  if (!origin) return true;
+
+  try {
+    const requestUrl = new URL(request.url);
+    const originUrl = new URL(origin);
+    if (originUrl.origin === requestUrl.origin) return true;
+
+    // In local development Next.js may bind to 0.0.0.0 while the browser uses
+    // localhost. The Host header represents the browser-visible destination.
+    const host = request.headers.get('host');
+    const forwardedProtocol = request.headers
+      .get('x-forwarded-proto')
+      ?.split(',')[0]
+      .trim();
+    const protocol = forwardedProtocol
+      ? `${forwardedProtocol.replace(/:$/, '')}:`
+      : requestUrl.protocol;
+
+    return Boolean(
+      host && originUrl.host === host && originUrl.protocol === protocol
+    );
+  } catch {
+    return false;
+  }
 }

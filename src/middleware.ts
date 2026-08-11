@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { isSameOriginMutation } from '@/lib/request-security';
+import { buildContentSecurityPolicy } from '@/lib/security';
 import { getSessionSecret } from '@/lib/session';
 
 export async function middleware(request: NextRequest) {
@@ -36,27 +37,11 @@ export async function middleware(request: NextRequest) {
   return withSecurityHeaders(NextResponse.next());
 }
 
-function buildCsp(): string {
-  return [
-    "default-src 'self'",
-    "base-uri 'self'",
-    "object-src 'none'",
-    "frame-ancestors 'none'",
-    "form-action 'self'",
-    "script-src 'self' 'unsafe-inline'",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https:",
-    "media-src 'self' blob: https:",
-    "connect-src 'self' https:",
-    "font-src 'self' data:",
-    "worker-src 'self' blob:",
-    "manifest-src 'self'",
-    'upgrade-insecure-requests',
-  ].join('; ');
-}
-
 function withSecurityHeaders(response: NextResponse): NextResponse {
-  response.headers.set('Content-Security-Policy', buildCsp());
+  response.headers.set(
+    'Content-Security-Policy',
+    buildContentSecurityPolicy(process.env.NODE_ENV === 'development')
+  );
   response.headers.set(
     'Strict-Transport-Security',
     'max-age=31536000; includeSubDomains'

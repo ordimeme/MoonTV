@@ -12,7 +12,7 @@ interface PageLayoutProps {
 
 const PageLayout = ({ children, activePath = '/' }: PageLayoutProps) => {
   return (
-    <div className='w-full min-h-screen'>
+    <div className='app-page-shell w-full min-h-screen'>
       {/* 移动端头部 */}
       <MobileHeader showBackButton={['/play'].includes(activePath)} />
 
@@ -39,12 +39,7 @@ const PageLayout = ({ children, activePath = '/' }: PageLayoutProps) => {
           </div>
 
           {/* 主内容 */}
-          <main
-            className='flex-1 md:min-h-0 mb-14 md:mb-0'
-            style={{
-              paddingBottom: 'calc(3.5rem + env(safe-area-inset-bottom))',
-            }}
-          >
+          <main className='app-mobile-page-content flex-1 md:min-h-0 md:mb-0'>
             {children}
           </main>
         </div>
