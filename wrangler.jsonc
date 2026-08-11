@@ -7,7 +7,7 @@
   "routes": [
     {
       "pattern": "moonvideo.ccwu.cc/*",
-      "zone_name": "ccwu.cc"
+      "zone_name": "moonvideo.ccwu.cc"
     }
   ],
   "vars": {
