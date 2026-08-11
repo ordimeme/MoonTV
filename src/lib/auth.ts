@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 
 import { AdminConfig } from './admin.types';
+import { getCloudflareBinding } from './cloudflare-context';
 import {
   getSessionSecret,
   SessionPayload,
@@ -17,7 +18,7 @@ interface D1Database {
 }
 
 async function getD1AdminConfig(): Promise<AdminConfig | null> {
-  const database = (process.env as unknown as { DB?: D1Database }).DB;
+  const database = await getCloudflareBinding<D1Database>('DB');
   if (!database) return null;
   const row = await database
     .prepare('SELECT config FROM admin_config WHERE id = 1')
@@ -25,6 +26,30 @@ async function getD1AdminConfig(): Promise<AdminConfig | null> {
   if (!row?.config) return null;
   try {
     return JSON.parse(row.config) as AdminConfig;
+  } catch {
+    return null;
+  }
+}
+
+async function getUpstashAdminConfig(): Promise<AdminConfig | null> {
+  const baseUrl = process.env.UPSTASH_URL;
+  const token = process.env.UPSTASH_TOKEN;
+  if (!baseUrl || !token) return null;
+  try {
+    const response = await fetch(
+      `${baseUrl.replace(/\/$/, '')}/get/${encodeURIComponent('admin:config')}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      }
+    );
+    if (!response.ok) return null;
+    const payload = (await response.json()) as { result?: unknown };
+    const value = payload.result;
+    if (!value) return null;
+    return typeof value === 'string'
+      ? (JSON.parse(value) as AdminConfig)
+      : (value as AdminConfig);
   } catch {
     return null;
   }
@@ -53,10 +78,14 @@ export async function getAuthInfoFromCookie(
     return session.role === 'owner' ? session : null;
   }
 
-  // D1 is the Cloudflare production mode. Read it directly here so the Edge
-  // middleware does not import Node-only configuration code.
-  if (storageType !== 'd1') return session;
-  const config = await getD1AdminConfig();
+  // 会话必须实时复核封禁、角色和密码失效时间。D1 直接读取绑定，
+  // Upstash 通过 REST 读取；不具备 Edge 可读状态的存储模式一律失败关闭。
+  const config =
+    storageType === 'd1'
+      ? await getD1AdminConfig()
+      : storageType === 'upstash'
+      ? await getUpstashAdminConfig()
+      : null;
   if (!config) return null;
   const user = config.UserConfig.Users.find(
     (entry) => entry.username === session.username

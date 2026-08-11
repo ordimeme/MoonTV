@@ -2,7 +2,7 @@
 
 'use client';
 
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, X } from 'lucide-react';
 import Link from 'next/link';
 import { Suspense, useEffect, useState } from 'react';
 
@@ -242,9 +242,9 @@ function HomeClient() {
                         </div>
                       ))
                     : // 显示真实数据
-                      hotMovies.map((movie, index) => (
+                      hotMovies.map((movie) => (
                         <div
-                          key={index}
+                          key={`movie-${movie.id}`}
                           className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
                         >
                           <VideoCard
@@ -290,9 +290,9 @@ function HomeClient() {
                         </div>
                       ))
                     : // 显示真实数据
-                      hotTvShows.map((show, index) => (
+                      hotTvShows.map((show) => (
                         <div
-                          key={index}
+                          key={`tv-${show.id}`}
                           className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
                         >
                           <VideoCard
@@ -337,9 +337,9 @@ function HomeClient() {
                         </div>
                       ))
                     : // 显示真实数据
-                      hotVarietyShows.map((show, index) => (
+                      hotVarietyShows.map((show) => (
                         <div
-                          key={index}
+                          key={`show-${show.id}`}
                           className='min-w-[96px] w-24 sm:min-w-[180px] sm:w-44'
                         >
                           <VideoCard
@@ -373,7 +373,9 @@ function HomeClient() {
                 onClick={() => handleCloseAnnouncement(announcement)}
                 className='text-gray-400 hover:text-gray-500 dark:text-gray-500 dark:hover:text-white transition-colors'
                 aria-label='关闭'
-              ></button>
+              >
+                <X className='h-6 w-6' />
+              </button>
             </div>
             <div className='mb-6'>
               <div className='relative overflow-hidden rounded-lg mb-4 bg-green-50 dark:bg-green-900/20'>

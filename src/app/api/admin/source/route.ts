@@ -2,6 +2,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { AdminConfigConflictError } from '@/lib/admin.types';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
 import { getStorage } from '@/lib/db';
@@ -9,13 +10,16 @@ import {
   readLimitedJson,
   RequestValidationError,
 } from '@/lib/request-security';
+import { auditVideoSource } from '@/lib/source-auditor';
+import {
+  deleteSourceFromConfig,
+  setSourceEnabled,
+} from '@/lib/source-management';
 import { IStorage } from '@/lib/types';
 import { isSafeUpstreamUrl } from '@/lib/upstream-security';
 
-export const runtime = 'edge';
-
 // 支持的操作类型
-type Action = 'add' | 'disable' | 'enable' | 'delete' | 'sort';
+type Action = 'add' | 'audit' | 'disable' | 'enable' | 'delete' | 'sort';
 
 interface BaseBody {
   action?: Action;
@@ -46,7 +50,14 @@ export async function POST(request: NextRequest) {
     const username = authInfo.username;
 
     // 基础校验
-    const ACTIONS: Action[] = ['add', 'disable', 'enable', 'delete', 'sort'];
+    const ACTIONS: Action[] = [
+      'add',
+      'audit',
+      'disable',
+      'enable',
+      'delete',
+      'sort',
+    ];
     if (!username || !action || !ACTIONS.includes(action)) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
     }
@@ -56,7 +67,8 @@ export async function POST(request: NextRequest) {
     const storage: IStorage | null = getStorage();
 
     // 权限与身份校验
-    if (username !== process.env.USERNAME) {
+    const isOwner = username === process.env.USERNAME;
+    if (!isOwner) {
       const userEntry = adminConfig.UserConfig.Users.find(
         (u) => u.username === username
       );
@@ -97,7 +109,10 @@ export async function POST(request: NextRequest) {
           api,
           detail,
           from: 'custom',
-          disabled: false,
+          disabled: true,
+          auditStatus: 'pending',
+          auditNote:
+            '新视频源处于隔离状态，请先运行服务器抽检，再由站长决定是否启用',
         });
         break;
       }
@@ -111,6 +126,19 @@ export async function POST(request: NextRequest) {
         entry.disabled = true;
         break;
       }
+      case 'audit': {
+        const { key } = body as { key?: string };
+        if (!key)
+          return NextResponse.json({ error: '缺少 key 参数' }, { status: 400 });
+        const entry = adminConfig.SourceConfig.find((s) => s.key === key);
+        if (!entry)
+          return NextResponse.json({ error: '源不存在' }, { status: 404 });
+        const result = await auditVideoSource(entry.api);
+        entry.auditStatus = result.status;
+        entry.auditNote = result.note;
+        entry.auditDate = result.auditDate;
+        break;
+      }
       case 'enable': {
         const { key } = body as { key?: string };
         if (!key)
@@ -118,21 +146,31 @@ export async function POST(request: NextRequest) {
         const entry = adminConfig.SourceConfig.find((s) => s.key === key);
         if (!entry)
           return NextResponse.json({ error: '源不存在' }, { status: 404 });
-        entry.disabled = false;
+        if (setSourceEnabled(entry, true, isOwner) === 'owner_required') {
+          return NextResponse.json(
+            { error: '服务器抽检仅提供建议，只有站长可以最终启用视频源' },
+            { status: 403 }
+          );
+        }
         break;
       }
       case 'delete': {
         const { key } = body as { key?: string };
         if (!key)
           return NextResponse.json({ error: '缺少 key 参数' }, { status: 400 });
-        const idx = adminConfig.SourceConfig.findIndex((s) => s.key === key);
-        if (idx === -1)
+        const result = deleteSourceFromConfig(
+          adminConfig.SourceConfig,
+          key,
+          isOwner
+        );
+        if (result === 'not_found') {
           return NextResponse.json({ error: '源不存在' }, { status: 404 });
-        const entry = adminConfig.SourceConfig[idx];
-        if (entry.from === 'config') {
-          return NextResponse.json({ error: '该源不可删除' }, { status: 400 });
         }
-        adminConfig.SourceConfig.splice(idx, 1);
+        if (result === 'owner_required')
+          return NextResponse.json(
+            { error: '仅站长可以删除内置视频源' },
+            { status: 403 }
+          );
         break;
       }
       case 'sort': {
@@ -182,6 +220,9 @@ export async function POST(request: NextRequest) {
         { error: error.message },
         { status: error.status }
       );
+    }
+    if (error instanceof AdminConfigConflictError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
     }
     console.error('视频源管理操作失败:', error);
     return NextResponse.json(

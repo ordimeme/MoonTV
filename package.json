@@ -6,7 +6,7 @@
     "dev": "pnpm gen:runtime && pnpm gen:manifest && next dev -H 0.0.0.0",
     "build": "pnpm gen:runtime && pnpm gen:manifest && next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint --max-warnings=0 src",
     "lint:fix": "eslint src --fix && pnpm format",
     "lint:strict": "eslint --max-warnings=0 src",
     "typecheck": "tsc --noEmit --incremental false",
@@ -19,7 +19,18 @@
     "gen:version": "node scripts/generate-version.js",
     "postbuild": "echo 'Build completed - sitemap generation disabled'",
     "prepare": "husky install",
-    "pages:build": "pnpm gen:runtime && pnpm gen:manifest && next build && npx @cloudflare/next-on-pages"
+    "cloudflare:build": "NEXT_PUBLIC_STORAGE_TYPE=d1 opennextjs-cloudflare build",
+    "cloudflare:preview": "pnpm cloudflare:build && opennextjs-cloudflare preview",
+    "cloudflare:deploy": "pnpm cloudflare:build && opennextjs-cloudflare deploy",
+    "d1:local:build": "pnpm cloudflare:build",
+    "d1:local:migrate": "wrangler d1 migrations apply moonvideo --local",
+    "d1:local:verify": "node scripts/d1-local.js verify",
+    "d1:local:prepare": "pnpm d1:local:migrate && pnpm d1:local:verify",
+    "d1:local:dev": "pnpm d1:local:build && pnpm d1:local:prepare && wrangler dev --local --port 8787",
+    "d1:local:reset": "node scripts/d1-local.js reset",
+    "security:audit": "pnpm audit --audit-level=low",
+    "security:audit:prod": "pnpm audit --prod --audit-level=low",
+    "quality": "pnpm lint:strict && pnpm typecheck && pnpm test --runInBand && pnpm security:audit"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -48,9 +59,9 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@cloudflare/next-on-pages": "^1.13.12",
     "@commitlint/cli": "^16.3.0",
     "@commitlint/config-conventional": "^16.2.4",
+    "@opennextjs/cloudflare": "1.20.2",
     "@svgr/webpack": "^8.1.0",
     "@tailwindcss/forms": "^0.5.10",
     "@testing-library/jest-dom": "^5.17.0",
@@ -76,7 +87,8 @@
     "prettier": "^2.8.8",
     "prettier-plugin-tailwindcss": "^0.5.0",
     "tailwindcss": "^3.4.17",
-    "typescript": "^4.9.5"
+    "typescript": "^4.9.5",
+    "wrangler": "4.120.1"
   },
   "lint-staged": {
     "**/*.{js,jsx,ts,tsx}": [

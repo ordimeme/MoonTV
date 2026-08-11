@@ -31,10 +31,18 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
       key,
     }));
 
-    // 按 save_time 降序排序（最新的在前面）
-    const sortedRecords = recordsArray.sort(
-      (a, b) => b.save_time - a.save_time
-    );
+    // 同一影片可能因换源产生多条记录；按标题、年份和剧集类型合并，
+    // 只保留最近观看的一条，避免首页重复展示。
+    const grouped = new Map<string, (typeof recordsArray)[number]>();
+    recordsArray
+      .sort((a, b) => b.save_time - a.save_time)
+      .forEach((record) => {
+        const identity = `${record.title.replace(/\s+/g, '').toLowerCase()}|${
+          record.year || 'unknown'
+        }|${record.total_episodes > 1 ? 'tv' : 'movie'}`;
+        if (!grouped.has(identity)) grouped.set(identity, record);
+      });
+    const sortedRecords = Array.from(grouped.values());
 
     setPlayRecords(sortedRecords);
   };

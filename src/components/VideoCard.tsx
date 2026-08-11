@@ -269,8 +269,17 @@ export default function VideoCard({
 
   return (
     <div
+      role='link'
+      tabIndex={0}
+      aria-label={`打开${actualTitle}`}
       className='group relative w-full rounded-lg bg-transparent cursor-pointer transition-all duration-300 ease-in-out hover:scale-[1.05] hover:z-[500]'
       onClick={handleClick}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          handleClick();
+        }
+      }}
     >
       {/* 海报容器 */}
       <div className='relative aspect-[2/3] overflow-hidden rounded-lg'>
@@ -302,24 +311,33 @@ export default function VideoCard({
 
         {/* 操作按钮 */}
         {(config.showHeart || config.showCheckCircle) && (
-          <div className='absolute bottom-3 right-3 flex gap-3 opacity-0 translate-y-2 transition-all duration-300 ease-in-out group-hover:opacity-100 group-hover:translate-y-0'>
+          <div className='absolute bottom-2 right-2 flex gap-1 opacity-100 sm:opacity-0 sm:translate-y-2 transition-all duration-300 ease-in-out group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100'>
             {config.showCheckCircle && (
-              <CheckCircle
+              <button
+                type='button'
+                aria-label='删除播放记录'
                 onClick={handleDeleteRecord}
-                size={20}
-                className='text-white transition-all duration-300 ease-out hover:stroke-green-500 hover:scale-[1.1]'
-              />
+                className='flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-white hover:text-green-400'
+              >
+                <CheckCircle size={20} />
+              </button>
             )}
             {config.showHeart && (
-              <Heart
+              <button
+                type='button'
+                aria-label={favorited ? '取消收藏' : '收藏'}
                 onClick={handleToggleFavorite}
-                size={20}
-                className={`transition-all duration-300 ease-out ${
-                  favorited
-                    ? 'fill-red-600 stroke-red-600'
-                    : 'fill-transparent stroke-white hover:stroke-red-400'
-                } hover:scale-[1.1]`}
-              />
+                className='flex h-11 w-11 items-center justify-center rounded-full bg-black/55'
+              >
+                <Heart
+                  size={20}
+                  className={`transition-colors ${
+                    favorited
+                      ? 'fill-red-600 stroke-red-600'
+                      : 'fill-transparent stroke-white hover:stroke-red-400'
+                  }`}
+                />
+              </button>
             )}
           </div>
         )}
@@ -342,6 +360,7 @@ export default function VideoCard({
         {/* 豆瓣链接 */}
         {config.showDoubanLink && actualDoubanId && (
           <a
+            aria-label={`在豆瓣查看${actualTitle}`}
             href={`https://movie.douban.com/subject/${actualDoubanId}`}
             target='_blank'
             rel='noopener noreferrer'

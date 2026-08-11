@@ -69,6 +69,10 @@ interface DataSource {
   api: string;
   detail?: string;
   disabled?: boolean;
+  deleted?: boolean;
+  auditStatus?: 'pending' | 'clean' | 'filterable' | 'blocked';
+  auditNote?: string;
+  auditDate?: string;
   from: 'config' | 'custom';
 }
 
@@ -641,9 +645,11 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 // 视频源配置组件
 const VideoSourceConfig = ({
   config,
+  role,
   refreshConfig,
 }: {
   config: AdminConfig | null;
+  role: 'owner' | 'admin' | null;
   refreshConfig: () => Promise<void>;
 }) => {
   const [sources, setSources] = useState<DataSource[]>([]);
@@ -676,7 +682,7 @@ const VideoSourceConfig = ({
   // 初始化
   useEffect(() => {
     if (config?.SourceConfig) {
-      setSources(config.SourceConfig);
+      setSources(config.SourceConfig.filter((source) => !source.deleted));
       // 进入时重置 orderChanged
       setOrderChanged(false);
     }
@@ -713,9 +719,48 @@ const VideoSourceConfig = ({
     });
   };
 
-  const handleDelete = (key: string) => {
-    callSourceApi({ action: 'delete', key }).catch(() => {
-      console.error('操作失败', 'delete', key);
+  const handleAudit = (key: string) => {
+    callSourceApi({ action: 'audit', key }).catch(() => {
+      console.error('审核视频源失败', key);
+    });
+  };
+
+  const handleOwnerEnable = async (source: DataSource) => {
+    const warning =
+      source.auditStatus === 'blocked' || source.auditStatus === 'pending';
+    const result = await Swal.fire({
+      icon: warning ? 'warning' : 'question',
+      title: `确认启用“${source.name}”？`,
+      text: warning
+        ? '服务器抽检提示存在风险或尚未完成。站长拥有最终决定权，启用后相关风险由站长确认承担。'
+        : '服务器抽检只是辅助建议，是否启用由站长最终决定。',
+      showCancelButton: true,
+      confirmButtonText: '站长确认启用',
+      cancelButtonText: '取消',
+      confirmButtonColor: warning ? '#dc2626' : '#16a34a',
+    });
+    if (!result.isConfirmed) return;
+    callSourceApi({ action: 'enable', key: source.key }).catch(() => {
+      console.error('启用视频源失败', source.key);
+    });
+  };
+
+  const handleDelete = async (source: DataSource) => {
+    const result = await Swal.fire({
+      icon: 'warning',
+      title: `删除“${source.name}”？`,
+      text:
+        source.from === 'config'
+          ? '该内置源将从站点隐藏，可通过“重置配置”恢复。'
+          : '该自定义源将被永久删除。',
+      showCancelButton: true,
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+      confirmButtonColor: '#dc2626',
+    });
+    if (!result.isConfirmed) return;
+    callSourceApi({ action: 'delete', key: source.key }).catch(() => {
+      console.error('操作失败', 'delete', source.key);
     });
   };
 
@@ -816,21 +861,51 @@ const VideoSourceConfig = ({
           >
             {!source.disabled ? '启用中' : '已禁用'}
           </span>
+          {source.auditNote && (
+            <p
+              className={`mt-2 max-w-[16rem] whitespace-normal text-xs leading-relaxed ${
+                source.auditStatus === 'blocked' ||
+                source.auditStatus === 'pending'
+                  ? 'text-red-600 dark:text-red-400'
+                  : source.auditStatus === 'filterable'
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-gray-500 dark:text-gray-400'
+              }`}
+              title={`审计日期：${source.auditDate || '未知'}`}
+            >
+              {source.auditNote}
+            </p>
+          )}
         </td>
         <td className='px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2'>
           <button
-            onClick={() => handleToggleEnable(source.key)}
-            className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium ${
-              !source.disabled
-                ? 'bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/60'
-                : 'bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/60'
-            } transition-colors`}
+            onClick={() => handleAudit(source.key)}
+            className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-200 transition-colors'
           >
-            {!source.disabled ? '禁用' : '启用'}
+            服务器抽检
           </button>
-          {source.from !== 'config' && (
+          {!source.disabled ? (
             <button
-              onClick={() => handleDelete(source.key)}
+              onClick={() => handleToggleEnable(source.key)}
+              className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/60 transition-colors'
+            >
+              禁用
+            </button>
+          ) : role === 'owner' ? (
+            <button
+              onClick={() => handleOwnerEnable(source)}
+              className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/60 transition-colors'
+            >
+              站长审核并启用
+            </button>
+          ) : (
+            <span className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'>
+              待站长决定
+            </span>
+          )}
+          {(source.from !== 'config' || role === 'owner') && (
+            <button
+              onClick={() => handleDelete(source)}
               className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700/40 dark:hover:bg-gray-700/60 dark:text-gray-200 transition-colors'
             >
               删除
@@ -915,6 +990,10 @@ const VideoSourceConfig = ({
           </div>
         </div>
       )}
+
+      <div className='rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-relaxed text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200'>
+        管理员和站长都可以新增视频源并运行服务器抽检。抽检结果仅是安全建议，不会自动改变视频源状态；只有站长可以作出最终启用决定，管理员可以随时紧急禁用。
+      </div>
 
       {/* 视频源表格 */}
       <div className='border border-gray-200 dark:border-gray-700 rounded-lg max-h-[28rem] overflow-y-auto overflow-x-auto'>
@@ -1856,7 +1935,11 @@ function AdminPageClient() {
               isExpanded={expandedTabs.videoSource}
               onToggle={() => toggleTab('videoSource')}
             >
-              <VideoSourceConfig config={config} refreshConfig={fetchConfig} />
+              <VideoSourceConfig
+                config={config}
+                role={role}
+                refreshConfig={fetchConfig}
+              />
             </CollapsibleTab>
 
             {/* 分类配置标签 */}

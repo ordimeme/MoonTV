@@ -3,6 +3,7 @@ import { SearchResult } from '@/lib/types';
 import {
   isSafeUpstreamUrl,
   readJsonResponseLimited,
+  readTextResponseLimited,
 } from '@/lib/upstream-security';
 import { cleanHtmlTags } from '@/lib/utils';
 
@@ -41,6 +42,7 @@ export async function searchFromApi(
 
     const response = await fetch(apiUrl, {
       headers: API_CONFIG.search.headers,
+      redirect: 'error',
       signal: controller.signal,
     });
 
@@ -132,6 +134,7 @@ export async function searchFromApi(
 
             const pageResponse = await fetch(pageUrl, {
               headers: API_CONFIG.search.headers,
+              redirect: 'error',
               signal: pageController.signal,
             });
 
@@ -226,6 +229,7 @@ export async function getDetailFromApi(
 
   const response = await fetch(detailUrl, {
     headers: API_CONFIG.detail.headers,
+    redirect: 'error',
     signal: controller.signal,
   });
 
@@ -301,6 +305,7 @@ async function handleSpecialSourceDetail(
 
   const response = await fetch(detailUrl, {
     headers: API_CONFIG.detail.headers,
+    redirect: 'error',
     signal: controller.signal,
   });
 
@@ -310,7 +315,7 @@ async function handleSpecialSourceDetail(
     throw new Error(`详情页请求失败: ${response.status}`);
   }
 
-  const html = await response.text();
+  const html = await readTextResponseLimited(response);
   let matches: string[] = [];
 
   if (apiSite.key === 'ffzy') {

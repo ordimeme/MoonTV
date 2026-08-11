@@ -1,3 +1,5 @@
+import { getCloudflareBinding } from './cloudflare-context';
+
 interface D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement;
   first<T>(): Promise<T | null>;
@@ -43,6 +45,12 @@ export const REGISTER_RATE_LIMIT: RateLimitPolicy = {
   blockMs: 60 * 60 * 1000,
 };
 
+export const SEARCH_RATE_LIMIT: RateLimitPolicy = {
+  maxAttempts: 30,
+  windowMs: 60 * 1000,
+  blockMs: 60 * 1000,
+};
+
 const TABLE_SQL = `CREATE TABLE IF NOT EXISTS auth_rate_limits (
   key_hash TEXT PRIMARY KEY,
   attempts INTEGER NOT NULL,
@@ -54,9 +62,9 @@ const TABLE_SQL = `CREATE TABLE IF NOT EXISTS auth_rate_limits (
 const localBuckets = new Map<string, LocalBucket>();
 let tableReady: Promise<void> | null = null;
 
-function getD1(): D1Database | null {
+async function getD1(): Promise<D1Database | null> {
   if ((process.env.NEXT_PUBLIC_STORAGE_TYPE || '') !== 'd1') return null;
-  return (process.env as unknown as { DB?: D1Database }).DB || null;
+  return (await getCloudflareBinding<D1Database>('DB')) || null;
 }
 
 async function ensureTable(db: D1Database): Promise<void> {
@@ -139,12 +147,56 @@ export async function createRateLimitKey(
   );
 }
 
+export async function createRateLimitKeys(
+  request: Request,
+  scope: string,
+  identity = ''
+): Promise<string[]> {
+  const addressKey = await createRateLimitKey(request, scope);
+  if (!identity.trim()) return [addressKey];
+  const identityKey = await createRateLimitKey(request, scope, identity);
+  return identityKey === addressKey ? [addressKey] : [addressKey, identityKey];
+}
+
+export async function checkRateLimits(
+  keys: string[],
+  policy: RateLimitPolicy
+): Promise<RateLimitStatus> {
+  const statuses = await Promise.all(
+    keys.map((key) => checkRateLimit(key, policy))
+  );
+  return statuses.reduce<RateLimitStatus>(
+    (result, status) =>
+      status.allowed
+        ? result
+        : {
+            allowed: false,
+            retryAfterSeconds: Math.max(
+              result.retryAfterSeconds,
+              status.retryAfterSeconds
+            ),
+          },
+    { allowed: true, retryAfterSeconds: 0 }
+  );
+}
+
+export async function recordRateLimitAttempts(
+  keys: string[],
+  policy: RateLimitPolicy
+): Promise<void> {
+  await Promise.all(keys.map((key) => recordRateLimitFailure(key, policy)));
+}
+
+export async function clearRateLimits(keys: string[]): Promise<void> {
+  await Promise.all(keys.map((key) => clearRateLimit(key)));
+}
+
 export async function checkRateLimit(
   key: string,
   policy: RateLimitPolicy,
   now = Date.now()
 ): Promise<RateLimitStatus> {
-  const db = getD1();
+  const db = await getD1();
   if (db) {
     try {
       await ensureTable(db);
@@ -176,7 +228,7 @@ export async function recordRateLimitFailure(
   policy: RateLimitPolicy,
   now = Date.now()
 ): Promise<void> {
-  const db = getD1();
+  const db = await getD1();
   if (db) {
     try {
       await ensureTable(db);
@@ -217,7 +269,7 @@ export async function recordRateLimitFailure(
 }
 
 export async function clearRateLimit(key: string): Promise<void> {
-  const db = getD1();
+  const db = await getD1();
   if (db) {
     try {
       await ensureTable(db);

@@ -12,14 +12,20 @@ export function serializeForInlineScript(value: unknown): string {
     .replace(/\u2029/g, '\\u2029');
 }
 
-export function buildContentSecurityPolicy(isDevelopment: boolean): string {
-  const scriptSources = ["'self'", "'unsafe-inline'"];
+export function buildContentSecurityPolicy(
+  isDevelopment: boolean,
+  nonce?: string
+): string {
+  const scriptSources = ["'self'"];
+  if (nonce) {
+    scriptSources.push(`'nonce-${nonce}'`, "'strict-dynamic'");
+  }
   if (isDevelopment) {
     // Next.js React Refresh uses eval in the local development bundle.
     scriptSources.push("'unsafe-eval'");
   }
 
-  return [
+  const directives = [
     "default-src 'self'",
     "base-uri 'self'",
     "object-src 'none'",
@@ -28,11 +34,12 @@ export function buildContentSecurityPolicy(isDevelopment: boolean): string {
     `script-src ${scriptSources.join(' ')}`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
-    "media-src 'self' blob: https:",
-    "connect-src 'self' https:",
+    "media-src 'self' blob:",
+    `connect-src 'self'${isDevelopment ? ' ws:' : ''}`,
     "font-src 'self' data:",
     "worker-src 'self' blob:",
     "manifest-src 'self'",
-    'upgrade-insecure-requests',
-  ].join('; ');
+  ];
+  if (!isDevelopment) directives.push('upgrade-insecure-requests');
+  return directives.join('; ');
 }

@@ -2,7 +2,14 @@
 
 'use client';
 
-import { Clover, Film, Home, Search, Star, Tv } from 'lucide-react';
+import {
+  Clapperboard,
+  House,
+  Library,
+  Search,
+  Sparkles,
+  Tv,
+} from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -21,10 +28,10 @@ const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
   const currentActive = activePath ?? pathname;
 
   const [navItems, setNavItems] = useState([
-    { icon: Home, label: '首页', href: '/' },
+    { icon: House, label: '首页', href: '/' },
     { icon: Search, label: '搜索', href: '/search' },
     {
-      icon: Film,
+      icon: Clapperboard,
       label: '电影',
       href: '/douban?type=movie',
     },
@@ -34,7 +41,7 @@ const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
       href: '/douban?type=tv',
     },
     {
-      icon: Clover,
+      icon: Sparkles,
       label: '综艺',
       href: '/douban?type=show',
     },
@@ -46,7 +53,7 @@ const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
       setNavItems((prevItems) => [
         ...prevItems,
         {
-          icon: Star,
+          icon: Library,
           label: '自定义',
           href: '/douban?type=custom',
         },

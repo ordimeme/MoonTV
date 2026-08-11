@@ -3,44 +3,81 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getCloudflareBinding } from '@/lib/cloudflare-context';
 import { isSameOriginMutation } from '@/lib/request-security';
 import { buildContentSecurityPolicy } from '@/lib/security';
 import { getSessionSecret } from '@/lib/session';
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const nonce = createNonce();
 
   if (pathname.startsWith('/api/') && !isSameOriginMutation(request)) {
     return withSecurityHeaders(
       NextResponse.json(
         { error: 'Cross-site request blocked' },
         { status: 403 }
-      )
+      ),
+      nonce
     );
   }
 
   // 跳过不需要认证的路径
   if (shouldSkipAuth(pathname)) {
-    return withSecurityHeaders(NextResponse.next());
+    return nextWithNonce(request, nonce);
   }
 
-  if (!getSessionSecret()) {
+  if (!(await isRuntimeReady())) {
     // 如果没有设置密码，重定向到警告页面
     const warningUrl = new URL('/warning', request.url);
-    return withSecurityHeaders(NextResponse.redirect(warningUrl));
+    return withSecurityHeaders(NextResponse.redirect(warningUrl), nonce);
   }
 
   const session = await getAuthInfoFromCookie(request);
   if (!session) {
-    return handleAuthFailure(request, pathname);
+    return handleAuthFailure(request, pathname, nonce);
   }
-  return withSecurityHeaders(NextResponse.next());
+  return nextWithNonce(request, nonce);
 }
 
-function withSecurityHeaders(response: NextResponse): NextResponse {
+function createNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return btoa(String.fromCharCode(...Array.from(bytes)));
+}
+
+function nextWithNonce(request: NextRequest, nonce: string): NextResponse {
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-nonce', nonce);
+  return withSecurityHeaders(
+    NextResponse.next({ request: { headers: requestHeaders } }),
+    nonce
+  );
+}
+
+async function isRuntimeReady(): Promise<boolean> {
+  if (!getSessionSecret()) return false;
+  const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
+  if (!process.env.PASSWORD) return false;
+  if (storageType === 'localstorage') return true;
+  if (!process.env.USERNAME) return false;
+  if (storageType === 'd1') {
+    return Boolean(await getCloudflareBinding('DB'));
+  }
+  if (storageType === 'upstash') {
+    return Boolean(process.env.UPSTASH_URL && process.env.UPSTASH_TOKEN);
+  }
+  // TCP Redis 无法在 Edge middleware 中实时复核封禁/撤销状态，故不再
+  // 作为安全登录模式启用；可改用 D1 或带 REST 接口的 Upstash。
+  return false;
+}
+
+function withSecurityHeaders(
+  response: NextResponse,
+  nonce: string
+): NextResponse {
   response.headers.set(
     'Content-Security-Policy',
-    buildContentSecurityPolicy(process.env.NODE_ENV === 'development')
+    buildContentSecurityPolicy(process.env.NODE_ENV === 'development', nonce)
   );
   response.headers.set(
     'Strict-Transport-Security',
@@ -60,12 +97,14 @@ function withSecurityHeaders(response: NextResponse): NextResponse {
 // 处理认证失败的情况
 function handleAuthFailure(
   request: NextRequest,
-  pathname: string
+  pathname: string,
+  nonce: string
 ): NextResponse {
   // 如果是 API 路由，返回 401 状态码
   if (pathname.startsWith('/api')) {
     return withSecurityHeaders(
-      new NextResponse('Unauthorized', { status: 401 })
+      new NextResponse('Unauthorized', { status: 401 }),
+      nonce
     );
   }
 
@@ -74,7 +113,7 @@ function handleAuthFailure(
   // 保留完整的URL，包括查询参数
   const fullUrl = `${pathname}${request.nextUrl.search}`;
   loginUrl.searchParams.set('redirect', fullUrl);
-  return withSecurityHeaders(NextResponse.redirect(loginUrl));
+  return withSecurityHeaders(NextResponse.redirect(loginUrl), nonce);
 }
 
 // 判断是否需要跳过认证的路径
@@ -86,6 +125,7 @@ function shouldSkipAuth(pathname: string): boolean {
     '/api/register',
     '/api/logout',
     '/api/server-config',
+    '/api/runtime-config',
   ];
   if (publicPaths.includes(pathname)) return true;
 

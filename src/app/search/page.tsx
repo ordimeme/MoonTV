@@ -30,6 +30,7 @@ function SearchPageClient() {
   const [isLoading, setIsLoading] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchError, setSearchError] = useState('');
 
   // 获取默认聚合设置：只读取用户本地设置，默认为 true
   const getDefaultAggregate = () => {
@@ -93,9 +94,6 @@ function SearchPageClient() {
   }, [searchResults]);
 
   useEffect(() => {
-    // 无搜索参数时聚焦搜索框
-    !searchParams.get('q') && document.getElementById('searchInput')?.focus();
-
     // 初始加载搜索历史
     getSearchHistory().then(setSearchHistory);
 
@@ -107,41 +105,14 @@ function SearchPageClient() {
       }
     );
 
-    // 获取滚动位置的函数 - 专门针对 body 滚动
-    const getScrollTop = () => {
-      return document.body.scrollTop || 0;
-    };
-
-    // 使用 requestAnimationFrame 持续检测滚动位置
-    let isRunning = false;
-    const checkScrollPosition = () => {
-      if (!isRunning) return;
-
-      const scrollTop = getScrollTop();
-      const shouldShow = scrollTop > 300;
-      setShowBackToTop(shouldShow);
-
-      requestAnimationFrame(checkScrollPosition);
-    };
-
-    // 启动持续检测
-    isRunning = true;
-    checkScrollPosition();
-
-    // 监听 body 元素的滚动事件
     const handleScroll = () => {
-      const scrollTop = getScrollTop();
-      setShowBackToTop(scrollTop > 300);
+      setShowBackToTop(window.scrollY > 300);
     };
-
-    document.body.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('scroll', handleScroll, { passive: true });
 
     return () => {
       unsubscribe();
-      isRunning = false; // 停止 requestAnimationFrame 循环
-
-      // 移除 body 滚动事件监听器
-      document.body.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('scroll', handleScroll);
     };
   }, []);
 
@@ -162,11 +133,15 @@ function SearchPageClient() {
   const fetchSearchResults = async (query: string) => {
     try {
       setIsLoading(true);
+      setSearchError('');
       const response = await fetch(
         `/api/search?q=${encodeURIComponent(query.trim())}`
       );
       const data = await response.json();
-      let results = data.results;
+      if (!response.ok) {
+        throw new Error(data.error || '搜索失败，请稍后重试');
+      }
+      let results = Array.isArray(data.results) ? data.results : [];
       if (
         typeof window !== 'undefined' &&
         !(window as any).RUNTIME_CONFIG?.DISABLE_YELLOW_FILTER
@@ -206,6 +181,10 @@ function SearchPageClient() {
       setShowResults(true);
     } catch (error) {
       setSearchResults([]);
+      setSearchError(
+        error instanceof Error ? error.message : '搜索失败，请稍后重试'
+      );
+      setShowResults(true);
     } finally {
       setIsLoading(false);
     }
@@ -222,24 +201,19 @@ function SearchPageClient() {
     setShowResults(true);
 
     router.push(`/search?q=${encodeURIComponent(trimmed)}`);
-    // 直接发请求
-    fetchSearchResults(trimmed);
-
-    // 保存到搜索历史 (事件监听会自动更新界面)
-    addSearchHistory(trimmed);
   };
 
   // 返回顶部功能
   const scrollToTop = () => {
     try {
       // 根据调试结果，真正的滚动容器是 document.body
-      document.body.scrollTo({
+      window.scrollTo({
         top: 0,
         behavior: 'smooth',
       });
     } catch (error) {
       // 如果平滑滚动完全失败，使用立即滚动
-      document.body.scrollTop = 0;
+      window.scrollTo(0, 0);
     }
   };
 
@@ -295,6 +269,21 @@ function SearchPageClient() {
                   </div>
                 </label>
               </div>
+              {searchError && (
+                <div
+                  role='alert'
+                  className='mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300'
+                >
+                  <p>{searchError}</p>
+                  <button
+                    type='button'
+                    onClick={() => fetchSearchResults(searchQuery)}
+                    className='mt-3 min-h-11 rounded-lg bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700'
+                  >
+                    重新搜索
+                  </button>
+                </div>
+              )}
               <div
                 key={`search-results-${viewMode}`}
                 className='justify-start grid grid-cols-3 gap-x-2 gap-y-14 sm:gap-y-20 px-0 sm:px-2 sm:grid-cols-[repeat(auto-fill,_minmax(11rem,_1fr))] sm:gap-x-8'
@@ -339,7 +328,7 @@ function SearchPageClient() {
                         />
                       </div>
                     ))}
-                {searchResults.length === 0 && (
+                {!searchError && searchResults.length === 0 && (
                   <div className='col-span-full text-center text-gray-500 py-8 dark:text-gray-400'>
                     未找到相关结果
                   </div>

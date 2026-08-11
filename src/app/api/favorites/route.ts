@@ -5,9 +5,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { readLimitedJson } from '@/lib/request-security';
+import { PRIVATE_DATA_HEADERS } from '@/lib/response-security';
 import { Favorite } from '@/lib/types';
-
-export const runtime = 'edge';
 
 /**
  * GET /api/favorites
@@ -37,12 +36,18 @@ export async function GET(request: NextRequest) {
         );
       }
       const fav = await db.getFavorite(authInfo.username, source, id);
-      return NextResponse.json(fav, { status: 200 });
+      return NextResponse.json(fav, {
+        status: 200,
+        headers: PRIVATE_DATA_HEADERS,
+      });
     }
 
     // 查询全部收藏
     const favorites = await db.getAllFavorites(authInfo.username);
-    return NextResponse.json(favorites, { status: 200 });
+    return NextResponse.json(favorites, {
+      status: 200,
+      headers: PRIVATE_DATA_HEADERS,
+    });
   } catch (err) {
     console.error('获取收藏失败', err);
     return NextResponse.json(

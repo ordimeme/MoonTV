@@ -2,6 +2,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { AdminConfigConflictError } from '@/lib/admin.types';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
 import { getStorage } from '@/lib/db';
@@ -11,8 +12,6 @@ import {
   RequestValidationError,
 } from '@/lib/request-security';
 import { IStorage } from '@/lib/types';
-
-export const runtime = 'edge';
 
 export async function POST(request: NextRequest) {
   const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
@@ -64,16 +63,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 修改密码
-    await storage.changePassword(username, newPassword);
-
     const config = await getConfig();
     const user = config.UserConfig.Users.find(
       (entry) => entry.username === username
     );
+    const previousInvalidBefore = user?.authInvalidBefore;
     if (user) {
       user.authInvalidBefore = Date.now();
       await storage.setAdminConfig(config);
+    }
+    try {
+      await storage.changePassword(username, newPassword);
+    } catch (error) {
+      if (user) {
+        user.authInvalidBefore = previousInvalidBefore;
+        await storage.setAdminConfig(config);
+      }
+      throw error;
     }
 
     const response = NextResponse.json({ ok: true });
@@ -85,6 +91,9 @@ export async function POST(request: NextRequest) {
         { error: error.message },
         { status: error.status }
       );
+    }
+    if (error instanceof AdminConfigConflictError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
     }
     console.error('修改密码失败:', error);
     return NextResponse.json(

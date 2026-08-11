@@ -2,6 +2,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { AdminConfigConflictError } from '@/lib/admin.types';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
 import { getStorage } from '@/lib/db';
@@ -12,8 +13,6 @@ import {
   RequestValidationError,
 } from '@/lib/request-security';
 import { IStorage } from '@/lib/types';
-
-export const runtime = 'edge';
 
 // 支持的操作类型
 const ACTIONS = [
@@ -88,6 +87,7 @@ export async function POST(request: NextRequest) {
     // 获取配置与存储
     const adminConfig = await getConfig();
     const storage: IStorage | null = getStorage();
+    let configSaved = false;
 
     // 判定操作者角色
     let operatorRole: 'owner' | 'admin';
@@ -143,8 +143,6 @@ export async function POST(request: NextRequest) {
               { status: 500 }
             );
           }
-          await storage.registerUser(targetUsername!, targetPassword);
-          // 更新配置
           adminConfig.UserConfig.Users.push({
             username: targetUsername!,
             role: 'user',
@@ -153,6 +151,17 @@ export async function POST(request: NextRequest) {
             adminConfig.UserConfig.Users[
               adminConfig.UserConfig.Users.length - 1
             ];
+          await storage.setAdminConfig(adminConfig);
+          configSaved = true;
+          try {
+            await storage.registerUser(targetUsername!, targetPassword);
+          } catch (error) {
+            adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.filter(
+              (entry) => entry.username !== targetUsername
+            );
+            await storage.setAdminConfig(adminConfig);
+            throw error;
+          }
           break;
         }
         case 'ban': {
@@ -280,8 +289,17 @@ export async function POST(request: NextRequest) {
             );
           }
 
-          await storage.changePassword(targetUsername!, targetPassword);
+          const previousInvalidBefore = targetEntry.authInvalidBefore;
           targetEntry.authInvalidBefore = Date.now();
+          await storage.setAdminConfig(adminConfig);
+          configSaved = true;
+          try {
+            await storage.changePassword(targetUsername!, targetPassword);
+          } catch (error) {
+            targetEntry.authInvalidBefore = previousInvalidBefore;
+            await storage.setAdminConfig(adminConfig);
+            throw error;
+          }
           break;
         }
         case 'deleteUser': {
@@ -314,14 +332,24 @@ export async function POST(request: NextRequest) {
             );
           }
 
-          await storage.deleteUser(targetUsername!);
-
           // 从配置中移除用户
           const userIndex = adminConfig.UserConfig.Users.findIndex(
             (u) => u.username === targetUsername
           );
+          const removedUser = adminConfig.UserConfig.Users[userIndex];
           if (userIndex > -1) {
             adminConfig.UserConfig.Users.splice(userIndex, 1);
+          }
+          await storage.setAdminConfig(adminConfig);
+          configSaved = true;
+          try {
+            await storage.deleteUser(targetUsername!);
+          } catch (error) {
+            if (removedUser) {
+              adminConfig.UserConfig.Users.splice(userIndex, 0, removedUser);
+              await storage.setAdminConfig(adminConfig);
+            }
+            throw error;
           }
 
           break;
@@ -332,8 +360,8 @@ export async function POST(request: NextRequest) {
     }
 
     // 将更新后的配置写入数据库
-    if (storage && typeof (storage as any).setAdminConfig === 'function') {
-      await (storage as any).setAdminConfig(adminConfig);
+    if (storage && !configSaved) {
+      await storage.setAdminConfig(adminConfig);
     }
 
     return NextResponse.json(
@@ -350,6 +378,9 @@ export async function POST(request: NextRequest) {
         { error: error.message },
         { status: error.status }
       );
+    }
+    if (error instanceof AdminConfigConflictError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
     }
     console.error('用户管理操作失败:', error);
     return NextResponse.json(

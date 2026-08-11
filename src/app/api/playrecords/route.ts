@@ -5,9 +5,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { readLimitedJson } from '@/lib/request-security';
+import { PRIVATE_DATA_HEADERS } from '@/lib/response-security';
 import { PlayRecord } from '@/lib/types';
-
-export const runtime = 'edge';
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,7 +17,10 @@ export async function GET(request: NextRequest) {
     }
 
     const records = await db.getAllPlayRecords(authInfo.username);
-    return NextResponse.json(records, { status: 200 });
+    return NextResponse.json(records, {
+      status: 200,
+      headers: PRIVATE_DATA_HEADERS,
+    });
   } catch (err) {
     console.error('获取播放记录失败', err);
     return NextResponse.json(

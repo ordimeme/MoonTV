@@ -1,13 +1,20 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
+import { getAuthInfoFromCookie } from '@/lib/auth';
+import {
+  checkRateLimits,
+  createRateLimitKeys,
+  recordRateLimitAttempts,
+  SEARCH_RATE_LIMIT,
+} from '@/lib/auth-rate-limit';
 import { getAvailableApiSites, getConfig } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
+import { relayMediaUrls } from '@/lib/media-relay';
+import { getSessionSecret } from '@/lib/session';
 import { yellowWords } from '@/lib/yellow';
 
-export const runtime = 'edge';
-
 // OrionTV 兼容接口
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get('q');
   const resourceId = searchParams.get('resourceId');
@@ -31,6 +38,27 @@ export async function GET(request: Request) {
       }
     );
   }
+
+  const authInfo = await getAuthInfoFromCookie(request);
+  if (!authInfo) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const rateLimitKeys = await createRateLimitKeys(
+    request,
+    'search-one',
+    authInfo.username || authInfo.role
+  );
+  const rateLimit = await checkRateLimits(rateLimitKeys, SEARCH_RATE_LIMIT);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: '搜索过于频繁，请稍后再试' },
+      {
+        status: 429,
+        headers: { 'Retry-After': String(rateLimit.retryAfterSeconds) },
+      }
+    );
+  }
+  await recordRateLimitAttempts(rateLimitKeys, SEARCH_RATE_LIMIT);
 
   const config = await getConfig();
   const apiSites = await getAvailableApiSites();
@@ -65,8 +93,16 @@ export async function GET(request: Request) {
         { status: 404 }
       );
     } else {
+      const secret = getSessionSecret();
+      if (!secret) throw new Error('服务器未配置会话密钥');
+      const safeResults = await Promise.all(
+        result.map(async (item) => ({
+          ...item,
+          episodes: await relayMediaUrls(item.episodes, secret),
+        }))
+      );
       return NextResponse.json(
-        { results: result },
+        { results: safeResults },
         {
           headers: {
             'Cache-Control': 'private, no-store',

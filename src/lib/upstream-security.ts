@@ -57,6 +57,13 @@ export async function readJsonResponseLimited<T>(
   response: Response,
   maxBytes = MAX_UPSTREAM_JSON_BYTES
 ): Promise<T> {
+  return JSON.parse(await readTextResponseLimited(response, maxBytes)) as T;
+}
+
+export async function readTextResponseLimited(
+  response: Response,
+  maxBytes = MAX_UPSTREAM_JSON_BYTES
+): Promise<string> {
   const contentLength = Number(response.headers.get('content-length'));
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
     throw new Error('上游响应过大');
@@ -87,5 +94,5 @@ export async function readJsonResponseLimited<T>(
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return JSON.parse(new TextDecoder().decode(bytes)) as T;
+  return new TextDecoder().decode(bytes);
 }

@@ -1,9 +1,7 @@
 'use client';
 
-import Link from 'next/link';
-
 import { BackButton } from './BackButton';
-import { useSite } from './SiteProvider';
+import BrandLogo from './BrandLogo';
 import { ThemeToggle } from './ThemeToggle';
 import { UserMenu } from './UserMenu';
 
@@ -12,7 +10,6 @@ interface MobileHeaderProps {
 }
 
 const MobileHeader = ({ showBackButton = false }: MobileHeaderProps) => {
-  const { siteName } = useSite();
   return (
     <header className='app-mobile-header md:hidden relative w-full bg-white/70 backdrop-blur-xl border-b border-gray-200/50 shadow-sm dark:bg-gray-900/70 dark:border-gray-700/50'>
       <div className='app-mobile-header-row flex items-center justify-between'>
@@ -30,12 +27,7 @@ const MobileHeader = ({ showBackButton = false }: MobileHeaderProps) => {
 
       {/* 中间：Logo（绝对居中） */}
       <div className='app-mobile-title-container absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2'>
-        <Link
-          href='/'
-          className='app-mobile-title block font-bold text-green-600 tracking-tight hover:opacity-80 transition-opacity'
-        >
-          {siteName}
-        </Link>
+        <BrandLogo className='app-mobile-title text-lg' />
       </div>
     </header>
   );

@@ -2,32 +2,18 @@
 
 'use client';
 
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 
+import { BRAND_DESCRIPTION } from '@/lib/brand';
 import { getSafeRedirect } from '@/lib/security';
 import { clearPrivateApiCaches } from '@/lib/session.client';
-import { CURRENT_VERSION } from '@/lib/version';
 
+import BrandLogo from '@/components/BrandLogo';
 import { useSite } from '@/components/SiteProvider';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
-// 版本显示组件
-function VersionDisplay() {
-  return (
-    <button
-      onClick={() =>
-        window.open('https://github.com/senshinya/MoonTV', '_blank')
-      }
-      className='absolute bottom-4 left-1/2 transform -translate-x-1/2 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 transition-colors cursor-pointer'
-    >
-      <span className='font-mono'>v{CURRENT_VERSION}</span>
-    </button>
-  );
-}
-
 function LoginPageClient() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
@@ -75,7 +61,7 @@ function LoginPageClient() {
       if (res.ok) {
         await clearPrivateApiCaches();
         const redirect = getSafeRedirect(searchParams.get('redirect'));
-        router.replace(redirect);
+        window.location.replace(redirect);
       } else if (res.status === 401) {
         setError('密码错误');
       } else {
@@ -105,7 +91,7 @@ function LoginPageClient() {
       if (res.ok) {
         await clearPrivateApiCaches();
         const redirect = getSafeRedirect(searchParams.get('redirect'));
-        router.replace(redirect);
+        window.location.replace(redirect);
       } else {
         const data = await res.json().catch(() => ({}));
         setError(data.error ?? '服务器错误');
@@ -123,9 +109,10 @@ function LoginPageClient() {
         <ThemeToggle />
       </div>
       <div className='relative z-10 w-full max-w-md rounded-3xl bg-gradient-to-b from-white/90 via-white/70 to-white/40 dark:from-zinc-900/90 dark:via-zinc-900/70 dark:to-zinc-900/40 backdrop-blur-xl shadow-2xl p-10 dark:border dark:border-zinc-800'>
-        <h1 className='text-green-600 tracking-tight text-center text-3xl font-extrabold mb-8 bg-clip-text drop-shadow-sm'>
-          {siteName}
-        </h1>
+        <BrandLogo className='mb-3 flex text-3xl drop-shadow-sm' />
+        <p className='mb-8 text-center text-sm text-gray-500 dark:text-gray-400'>
+          {BRAND_DESCRIPTION}
+        </p>
         <form onSubmit={handleSubmit} className='space-y-8'>
           {shouldAskUsername && (
             <div>
@@ -194,8 +181,9 @@ function LoginPageClient() {
         </form>
       </div>
 
-      {/* 版本信息显示 */}
-      <VersionDisplay />
+      <p className='absolute bottom-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400'>
+        {siteName} · 私享播放体验
+      </p>
     </div>
   );
 }

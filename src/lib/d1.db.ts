@@ -1,6 +1,7 @@
 /* eslint-disable no-console, @typescript-eslint/no-explicit-any, @typescript-eslint/no-non-null-assertion */
 
-import { AdminConfig } from './admin.types';
+import { AdminConfig, AdminConfigConflictError } from './admin.types';
+import { getCloudflareBinding } from './cloudflare-context';
 import { hashPassword, isPasswordHash, verifyStoredPassword } from './password';
 import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
 
@@ -39,8 +40,10 @@ interface D1ExecResult {
 }
 
 // 获取全局D1数据库实例
-function getD1Database(): D1Database {
-  return (process.env as any).DB as D1Database;
+async function getD1Database(): Promise<D1Database> {
+  const database = await getCloudflareBinding<D1Database>('DB');
+  if (!database) throw new Error('D1 binding DB is not available');
+  return database;
 }
 
 export class D1Storage implements IStorage {
@@ -48,7 +51,7 @@ export class D1Storage implements IStorage {
 
   private async getDatabase(): Promise<D1Database> {
     if (!this.db) {
-      this.db = getD1Database();
+      this.db = await getD1Database();
     }
     return this.db;
   }
@@ -475,12 +478,36 @@ export class D1Storage implements IStorage {
   async setAdminConfig(config: AdminConfig): Promise<void> {
     try {
       const db = await this.getDatabase();
-      await db
+      const current = await db
+        .prepare('SELECT config FROM admin_config WHERE id = 1')
+        .first<{ config: string }>();
+      if (!current) {
+        const initial = { ...config, Revision: 1 };
+        const inserted = await db
+          .prepare(
+            'INSERT OR IGNORE INTO admin_config (id, config) VALUES (1, ?)'
+          )
+          .bind(JSON.stringify(initial))
+          .run();
+        if (inserted.meta.changes !== 1) throw new AdminConfigConflictError();
+        config.Revision = initial.Revision;
+        return;
+      }
+
+      const stored = JSON.parse(current.config) as AdminConfig;
+      const storedRevision = stored.Revision || 0;
+      if ((config.Revision || 0) !== storedRevision) {
+        throw new AdminConfigConflictError();
+      }
+      const next = { ...config, Revision: storedRevision + 1 };
+      const updated = await db
         .prepare(
-          'INSERT OR REPLACE INTO admin_config (id, config) VALUES (1, ?)'
+          "UPDATE admin_config SET config = ?, updated_at = strftime('%s', 'now') WHERE id = 1 AND config = ?"
         )
-        .bind(JSON.stringify(config))
+        .bind(JSON.stringify(next), current.config)
         .run();
+      if (updated.meta.changes !== 1) throw new AdminConfigConflictError();
+      config.Revision = next.Revision;
     } catch (err) {
       console.error('Failed to set admin config:', err);
       throw err;

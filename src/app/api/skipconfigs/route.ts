@@ -5,9 +5,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { readLimitedJson } from '@/lib/request-security';
+import { PRIVATE_DATA_HEADERS } from '@/lib/response-security';
 import { SkipConfig } from '@/lib/types';
-
-export const runtime = 'edge';
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,11 +22,11 @@ export async function GET(request: NextRequest) {
     if (source && id) {
       // 获取单个配置
       const config = await db.getSkipConfig(authInfo.username, source, id);
-      return NextResponse.json(config);
+      return NextResponse.json(config, { headers: PRIVATE_DATA_HEADERS });
     } else {
       // 获取所有配置
       const configs = await db.getAllSkipConfigs(authInfo.username);
-      return NextResponse.json(configs);
+      return NextResponse.json(configs, { headers: PRIVATE_DATA_HEADERS });
     }
   } catch (error) {
     console.error('获取跳过片头片尾配置失败:', error);

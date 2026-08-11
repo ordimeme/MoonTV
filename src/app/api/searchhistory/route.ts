@@ -5,8 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { readLimitedJson } from '@/lib/request-security';
-
-export const runtime = 'edge';
+import { PRIVATE_DATA_HEADERS } from '@/lib/response-security';
 
 // 最大保存条数（与客户端保持一致）
 const HISTORY_LIMIT = 20;
@@ -24,7 +23,10 @@ export async function GET(request: NextRequest) {
     }
 
     const history = await db.getSearchHistory(authInfo.username);
-    return NextResponse.json(history, { status: 200 });
+    return NextResponse.json(history, {
+      status: 200,
+      headers: PRIVATE_DATA_HEADERS,
+    });
   } catch (err) {
     console.error('获取搜索历史失败', err);
     return NextResponse.json(

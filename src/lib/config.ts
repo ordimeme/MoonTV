@@ -2,8 +2,13 @@
 
 import { getStorage } from '@/lib/db';
 
-import { AdminConfig } from './admin.types';
+import { AdminConfig, AdminConfigConflictError } from './admin.types';
 import runtimeConfig from './runtime';
+import {
+  getSourceAuditPolicy,
+  isSourceAuditFresh,
+  SOURCE_AUDIT_DATE,
+} from './source-audit';
 import { isSafeUpstreamUrl } from './upstream-security';
 
 export interface ApiSite {
@@ -49,16 +54,78 @@ export const API_CONFIG = {
 let fileConfig: ConfigFileStruct;
 let cachedConfig: AdminConfig;
 
+type SourceConfigEntry = AdminConfig['SourceConfig'][number];
+
+function buildRuntimeSource(
+  key: string,
+  site: ApiSite,
+  existing?: SourceConfigEntry
+): SourceConfigEntry {
+  const policy = getSourceAuditPolicy(key);
+  const useExistingAudit = Boolean(
+    existing?.auditStatus && isSourceAuditFresh(existing.auditDate)
+  );
+  const auditDate = useExistingAudit
+    ? existing?.auditDate
+    : policy
+    ? SOURCE_AUDIT_DATE
+    : existing?.auditDate;
+  const auditIsFresh = isSourceAuditFresh(auditDate);
+  const auditStatus = useExistingAudit ? existing?.auditStatus : policy?.status;
+  const auditNote = useExistingAudit ? existing?.auditNote : policy?.note;
+  return {
+    ...existing,
+    key,
+    name: site.name,
+    api: site.api,
+    detail: site.detail,
+    from: 'config',
+    disabled: Boolean(
+      existing?.disabled ||
+        auditStatus === 'blocked' ||
+        auditStatus === 'pending' ||
+        !auditIsFresh
+    ),
+    deleted: existing?.deleted || false,
+    auditStatus: auditIsFresh ? auditStatus : 'pending',
+    auditNote: auditIsFresh
+      ? auditNote
+      : '审核已过期或尚未审核，需重新验证后才能启用',
+    auditDate,
+  };
+}
+
+function mergeRuntimeSources(
+  existingSources: SourceConfigEntry[] | undefined,
+  apiSiteEntries: [string, ApiSite][]
+): SourceConfigEntry[] {
+  const sourceConfigMap = new Map(
+    (existingSources || []).map((source) => [source.key, source])
+  );
+
+  apiSiteEntries.forEach(([key, site]) => {
+    sourceConfigMap.set(
+      key,
+      buildRuntimeSource(key, site, sourceConfigMap.get(key))
+    );
+  });
+
+  const apiSiteKeys = new Set(apiSiteEntries.map(([key]) => key));
+  sourceConfigMap.forEach((source) => {
+    if (!apiSiteKeys.has(source.key)) source.from = 'custom';
+  });
+
+  return Array.from(sourceConfigMap.values());
+}
+
 async function initConfig() {
   if (cachedConfig) {
     return;
   }
 
   if (process.env.DOCKER_ENV === 'true') {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    const _require = eval('require') as NodeRequire;
-    const fs = _require('fs') as typeof import('fs');
-    const path = _require('path') as typeof import('path');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
 
     const configPath = path.join(process.cwd(), 'config.json');
     const raw = fs.readFileSync(configPath, 'utf-8');
@@ -94,33 +161,12 @@ async function initConfig() {
       const apiSiteEntries = Object.entries(fileConfig.api_site);
       const customCategories = fileConfig.custom_category || [];
 
+      const shouldCreateAdminConfig = !adminConfig;
       if (adminConfig) {
-        // 补全 SourceConfig
-        const sourceConfigMap = new Map(
-          (adminConfig.SourceConfig || []).map((s) => [s.key, s])
+        adminConfig.SourceConfig = mergeRuntimeSources(
+          adminConfig.SourceConfig,
+          apiSiteEntries
         );
-
-        apiSiteEntries.forEach(([key, site]) => {
-          sourceConfigMap.set(key, {
-            key,
-            name: site.name,
-            api: site.api,
-            detail: site.detail,
-            from: 'config',
-            disabled: false,
-          });
-        });
-
-        // 将 Map 转换回数组
-        adminConfig.SourceConfig = Array.from(sourceConfigMap.values());
-
-        // 检查现有源是否在 fileConfig.api_site 中，如果不在则标记为 custom
-        const apiSiteKeys = new Set(apiSiteEntries.map(([key]) => key));
-        adminConfig.SourceConfig.forEach((source) => {
-          if (!apiSiteKeys.has(source.key)) {
-            source.from = 'custom';
-          }
-        });
 
         // 确保 CustomCategories 被初始化
         if (!adminConfig.CustomCategories) {
@@ -209,14 +255,7 @@ async function initConfig() {
             AllowRegister: process.env.NEXT_PUBLIC_ENABLE_REGISTER === 'true',
             Users: allUsers as any,
           },
-          SourceConfig: apiSiteEntries.map(([key, site]) => ({
-            key,
-            name: site.name,
-            api: site.api,
-            detail: site.detail,
-            from: 'config',
-            disabled: false,
-          })),
+          SourceConfig: mergeRuntimeSources([], apiSiteEntries),
           CustomCategories: customCategories.map((category) => ({
             name: category.name,
             type: category.type,
@@ -228,14 +267,38 @@ async function initConfig() {
       }
 
       // 写回数据库（更新/创建）
-      if (storage && typeof (storage as any).setAdminConfig === 'function') {
-        await (storage as any).setAdminConfig(adminConfig);
+      if (
+        shouldCreateAdminConfig &&
+        storage &&
+        typeof (storage as any).setAdminConfig === 'function'
+      ) {
+        try {
+          await (storage as any).setAdminConfig(adminConfig);
+        } catch (error) {
+          // 多个冷启动请求可能同时创建初始配置；输掉竞争的一方读取胜者，
+          // 不应把正常并发暴露成“数据库错误”。
+          const isConflict =
+            error instanceof AdminConfigConflictError ||
+            (error instanceof Error &&
+              error.name === 'AdminConfigConflictError');
+          if (
+            !isConflict ||
+            typeof (storage as any).getAdminConfig !== 'function'
+          ) {
+            throw error;
+          }
+          const persisted = await (storage as any).getAdminConfig();
+          if (!persisted) throw error;
+          adminConfig = persisted;
+        }
       }
 
       // 更新缓存
+      if (!adminConfig) throw new Error('管理员配置初始化失败');
       cachedConfig = adminConfig;
     } catch (err) {
       console.error('加载管理员配置失败:', err);
+      throw err;
     }
   } else {
     // 本地存储直接使用文件配置
@@ -257,14 +320,10 @@ async function initConfig() {
         AllowRegister: process.env.NEXT_PUBLIC_ENABLE_REGISTER === 'true',
         Users: [],
       },
-      SourceConfig: Object.entries(fileConfig.api_site).map(([key, site]) => ({
-        key,
-        name: site.name,
-        api: site.api,
-        detail: site.detail,
-        from: 'config',
-        disabled: false,
-      })),
+      SourceConfig: mergeRuntimeSources(
+        [],
+        Object.entries(fileConfig.api_site)
+      ),
       CustomCategories:
         fileConfig.custom_category?.map((category) => ({
           name: category.name,
@@ -295,68 +354,13 @@ export async function getConfig(): Promise<AdminConfig> {
       adminConfig.CustomCategories = [];
     }
 
-    // 合并一些环境变量配置
-    adminConfig.SiteConfig.SiteName = process.env.SITE_NAME || 'MoonTV';
-    adminConfig.SiteConfig.Announcement =
-      process.env.ANNOUNCEMENT ||
-      '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。';
-    adminConfig.UserConfig.AllowRegister =
-      process.env.NEXT_PUBLIC_ENABLE_REGISTER === 'true';
-    adminConfig.SiteConfig.ImageProxy =
-      process.env.NEXT_PUBLIC_IMAGE_PROXY || '';
-    adminConfig.SiteConfig.DoubanProxy =
-      process.env.NEXT_PUBLIC_DOUBAN_PROXY || '';
-    adminConfig.SiteConfig.DisableYellowFilter =
-      process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true';
-
     // 合并文件中的源信息
     fileConfig = runtimeConfig as unknown as ConfigFileStruct;
     const apiSiteEntries = Object.entries(fileConfig.api_site);
-    const sourceConfigMap = new Map(
-      (adminConfig.SourceConfig || []).map((s) => [s.key, s])
+    adminConfig.SourceConfig = mergeRuntimeSources(
+      adminConfig.SourceConfig,
+      apiSiteEntries
     );
-
-    apiSiteEntries.forEach(([key, site]) => {
-      const existingSource = sourceConfigMap.get(key);
-      if (existingSource) {
-        // 如果已存在，只覆盖 name、api、detail 和 from
-        existingSource.name = site.name;
-        existingSource.api = site.api;
-        existingSource.detail = site.detail;
-        existingSource.from = 'config';
-      } else {
-        // 如果不存在，创建新条目
-        sourceConfigMap.set(key, {
-          key,
-          name: site.name,
-          api: site.api,
-          detail: site.detail,
-          from: 'config',
-          disabled: false,
-        });
-      }
-    });
-
-    // 检查现有源是否在 fileConfig.api_site 中，如果不在则标记为 custom
-    const apiSiteKeys = new Set(apiSiteEntries.map(([key]) => key));
-    sourceConfigMap.forEach((source) => {
-      if (!apiSiteKeys.has(source.key)) {
-        source.from = 'custom';
-      }
-    });
-
-    // 将 Map 转换回数组
-    adminConfig.SourceConfig = Array.from(sourceConfigMap.values());
-
-    // 覆盖 CustomCategories
-    const customCategories = fileConfig.custom_category || [];
-    adminConfig.CustomCategories = customCategories.map((category) => ({
-      name: category.name,
-      type: category.type,
-      query: category.query,
-      from: 'config',
-      disabled: false,
-    }));
 
     const ownerUser = process.env.USERNAME || '';
     // 检查配置中的站长用户是否和 USERNAME 匹配，如果不匹配则降级为普通用户
@@ -372,7 +376,7 @@ export async function getConfig(): Promise<AdminConfig> {
     });
 
     // 如果不在则添加
-    if (!containOwner) {
+    if (ownerUser && !containOwner) {
       adminConfig.UserConfig.Users.unshift({
         username: ownerUser,
         role: 'owner',
@@ -400,10 +404,8 @@ export async function resetConfig() {
   }
 
   if (process.env.DOCKER_ENV === 'true') {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    const _require = eval('require') as NodeRequire;
-    const fs = _require('fs') as typeof import('fs');
-    const path = _require('path') as typeof import('path');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
 
     const configPath = path.join(process.cwd(), 'config.json');
     const raw = fs.readFileSync(configPath, 'utf-8');
@@ -446,14 +448,7 @@ export async function resetConfig() {
       AllowRegister: process.env.NEXT_PUBLIC_ENABLE_REGISTER === 'true',
       Users: allUsers as any,
     },
-    SourceConfig: apiSiteEntries.map(([key, site]) => ({
-      key,
-      name: site.name,
-      api: site.api,
-      detail: site.detail,
-      from: 'config',
-      disabled: false,
-    })),
+    SourceConfig: mergeRuntimeSources([], apiSiteEntries),
     CustomCategories:
       storageType === 'redis'
         ? customCategories?.map((category) => ({
@@ -489,6 +484,9 @@ export async function getAvailableApiSites(): Promise<ApiSite[]> {
   return config.SourceConfig.filter(
     (s) =>
       !s.disabled &&
+      !s.deleted &&
+      (s.auditStatus === 'clean' || s.auditStatus === 'filterable') &&
+      isSourceAuditFresh(s.auditDate) &&
       isSafeUpstreamUrl(s.api) &&
       (!s.detail || isSafeUpstreamUrl(s.detail))
   ).map((s) => ({

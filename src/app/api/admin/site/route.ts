@@ -2,12 +2,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { AdminConfigConflictError } from '@/lib/admin.types';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
 import { getStorage } from '@/lib/db';
 import { readLimitedJson } from '@/lib/request-security';
-
-export const runtime = 'edge';
 
 export async function POST(request: NextRequest) {
   const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
@@ -74,6 +73,17 @@ export async function POST(request: NextRequest) {
     ) {
       return NextResponse.json({ error: '参数超出允许范围' }, { status: 400 });
     }
+    const isSafeProxyPath = (value: string) =>
+      value === '' ||
+      (value.startsWith('/api/') &&
+        !value.startsWith('//') &&
+        !value.includes('\\'));
+    if (!isSafeProxyPath(ImageProxy) || !isSafeProxyPath(DoubanProxy)) {
+      return NextResponse.json(
+        { error: '代理地址仅允许使用本站 /api/ 路径' },
+        { status: 400 }
+      );
+    }
 
     const adminConfig = await getConfig();
     const storage = getStorage();
@@ -114,6 +124,9 @@ export async function POST(request: NextRequest) {
       }
     );
   } catch (error) {
+    if (error instanceof AdminConfigConflictError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     console.error('更新站点配置失败:', error);
     return NextResponse.json(
       {

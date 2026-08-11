@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
 
-export const runtime = 'edge';
-
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const ALLOWED_IMAGE_HOST_SUFFIXES = ['douban.com', 'doubanio.com'];

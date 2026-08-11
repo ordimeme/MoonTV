@@ -32,6 +32,11 @@ const nextConfig = {
   // Uncoment to add domain whitelist
   images: {
     unoptimized: true,
+    localPatterns: [
+      {
+        pathname: '/api/image-proxy',
+      },
+    ],
     remotePatterns: [
       {
         protocol: 'https',

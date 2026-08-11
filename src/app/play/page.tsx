@@ -4,7 +4,17 @@
 
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
-import { Heart } from 'lucide-react';
+import {
+  ArrowLeft,
+  ChevronRight,
+  CircleAlert,
+  Clapperboard,
+  Gauge,
+  Heart,
+  RefreshCw,
+  Search,
+  Sparkles,
+} from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
 
@@ -21,6 +31,8 @@ import {
   saveSkipConfig,
   subscribeToDataUpdates,
 } from '@/lib/db.client';
+import { filterInterstitialAdsFromM3U8 } from '@/lib/m3u8-ad-filter';
+import { PLAYER_ICONS } from '@/lib/player-icons';
 import { SearchResult } from '@/lib/types';
 import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
 
@@ -92,6 +104,10 @@ function PlayPageClient() {
   const [videoTitle, setVideoTitle] = useState(searchParams.get('title') || '');
   const [videoYear, setVideoYear] = useState(searchParams.get('year') || '');
   const [videoCover, setVideoCover] = useState('');
+  const [coverLoadFailed, setCoverLoadFailed] = useState(false);
+  useEffect(() => {
+    setCoverLoadFailed(false);
+  }, [videoCover]);
   // 当前源和ID
   const [currentSource, setCurrentSource] = useState(
     searchParams.get('source') || ''
@@ -425,26 +441,6 @@ function PlayPageClient() {
     }
   };
 
-  // 去广告相关函数
-  function filterAdsFromM3U8(m3u8Content: string): string {
-    if (!m3u8Content) return '';
-
-    // 按行分割M3U8内容
-    const lines = m3u8Content.split('\n');
-    const filteredLines = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-
-      // 只过滤#EXT-X-DISCONTINUITY标识
-      if (!line.includes('#EXT-X-DISCONTINUITY')) {
-        filteredLines.push(line);
-      }
-    }
-
-    return filteredLines.join('\n');
-  }
-
   // 跳过片头片尾配置相关函数
   const handleSkipConfigChange = async (newConfig: {
     enable: boolean;
@@ -473,7 +469,7 @@ function PlayPageClient() {
         artPlayerRef.current.setting.update({
           name: '设置片头',
           html: '设置片头',
-          icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="12" r="2" fill="#ffffff"/><path d="M9 12L17 12" stroke="#ffffff" stroke-width="2"/><path d="M17 6L17 18" stroke="#ffffff" stroke-width="2"/></svg>',
+          icon: PLAYER_ICONS.intro,
           tooltip:
             skipConfigRef.current.intro_time === 0
               ? '设置片头时间'
@@ -493,7 +489,7 @@ function PlayPageClient() {
         artPlayerRef.current.setting.update({
           name: '设置片尾',
           html: '设置片尾',
-          icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 6L7 18" stroke="#ffffff" stroke-width="2"/><path d="M7 12L15 12" stroke="#ffffff" stroke-width="2"/><circle cx="19" cy="12" r="2" fill="#ffffff"/></svg>',
+          icon: PLAYER_ICONS.outro,
           tooltip:
             skipConfigRef.current.outro_time >= 0
               ? '设置片尾时间'
@@ -565,8 +561,7 @@ function PlayPageClient() {
           ) {
             // 如果是m3u8文件，处理内容以移除广告分段
             if (response.data && typeof response.data === 'string') {
-              // 过滤掉广告段 - 实现更精确的广告过滤逻辑
-              response.data = filterAdsFromM3U8(response.data);
+              response.data = filterInterstitialAdsFromM3U8(response.data);
             }
             return onSuccess(response, stats, context, null);
           };
@@ -599,7 +594,8 @@ function PlayPageClient() {
         setAvailableSources([detailData]);
         return [detailData];
       } catch (err) {
-        console.error('获取视频详情失败:', err);
+        // 单个第三方源不可用是可恢复状态，页面会继续寻找替代源。
+        console.warn('当前视频源详情不可用，正在尝试替代源:', err);
         return [];
       } finally {
         setSourceSearchLoading(false);
@@ -649,10 +645,54 @@ function PlayPageClient() {
       setLoading(true);
       setLoadingStage(currentSource && currentId ? 'fetching' : 'searching');
       setLoadingMessage(
-        currentSource && currentId
-          ? '🎬 正在获取视频详情...'
-          : '🔍 正在搜索播放源...'
+        currentSource && currentId ? '正在获取视频详情...' : '正在搜索播放源...'
       );
+
+      // 已明确指定播放源时先只取当前详情，让播放器尽快可用；其他源在
+      // 后台补充，不再把首屏阻塞在全源搜索和测速上。
+      if (currentSource && currentId && !needPreferRef.current) {
+        const primary = await fetchSourceDetail(currentSource, currentId);
+        let detailData = primary[0];
+        if (!detailData) {
+          const replacements = await fetchSourcesData(
+            searchTitle || videoTitleRef.current
+          );
+          detailData = replacements[0];
+          if (!detailData) {
+            setError('当前播放源已停用，且未找到可替代播放源');
+            setLoading(false);
+            return;
+          }
+        }
+
+        setNeedPrefer(false);
+        setCurrentSource(detailData.source);
+        setCurrentId(detailData.id);
+        setVideoYear(detailData.year);
+        setVideoTitle(detailData.title || videoTitleRef.current);
+        setVideoCover(detailData.poster);
+        setDetail(detailData);
+        if (currentEpisodeIndex >= detailData.episodes.length) {
+          setCurrentEpisodeIndex(0);
+        }
+        setLoadingStage('ready');
+        setLoadingMessage('准备就绪');
+        setLoading(false);
+
+        const query = searchTitle || videoTitle || detailData.title;
+        void fetchSourcesData(query).then((results) => {
+          if (
+            !results.some(
+              (source) =>
+                source.source === detailData.source &&
+                source.id === detailData.id
+            )
+          ) {
+            setAvailableSources([detailData, ...results]);
+          }
+        });
+        return;
+      }
 
       let sourcesInfo = await fetchSourcesData(searchTitle || videoTitle);
       if (
@@ -691,7 +731,7 @@ function PlayPageClient() {
         optimizationEnabled
       ) {
         setLoadingStage('preferring');
-        setLoadingMessage('⚡ 正在优选最佳播放源...');
+        setLoadingMessage('正在优选最佳播放源...');
 
         detailData = await preferBestSource(sourcesInfo);
       }
@@ -717,12 +757,9 @@ function PlayPageClient() {
       window.history.replaceState({}, '', newUrl.toString());
 
       setLoadingStage('ready');
-      setLoadingMessage('✨ 准备就绪，即将开始播放...');
+      setLoadingMessage('准备就绪，即将开始播放...');
 
-      // 短暂延迟让用户看到完成状态
-      setTimeout(() => {
-        setLoading(false);
-      }, 1000);
+      setLoading(false);
     };
 
     initAll();
@@ -1350,7 +1387,7 @@ function PlayPageClient() {
           {
             name: '设置片头',
             html: '设置片头',
-            icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="5" cy="12" r="2" fill="#ffffff"/><path d="M9 12L17 12" stroke="#ffffff" stroke-width="2"/><path d="M17 6L17 18" stroke="#ffffff" stroke-width="2"/></svg>',
+            icon: PLAYER_ICONS.intro,
             tooltip:
               skipConfigRef.current.intro_time === 0
                 ? '设置片头时间'
@@ -1370,7 +1407,7 @@ function PlayPageClient() {
           {
             name: '设置片尾',
             html: '设置片尾',
-            icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 6L7 18" stroke="#ffffff" stroke-width="2"/><path d="M7 12L15 12" stroke="#ffffff" stroke-width="2"/><circle cx="19" cy="12" r="2" fill="#ffffff"/></svg>',
+            icon: PLAYER_ICONS.outro,
             tooltip:
               skipConfigRef.current.outro_time >= 0
                 ? '设置片尾时间'
@@ -1397,7 +1434,7 @@ function PlayPageClient() {
           {
             position: 'left',
             index: 13,
-            html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" fill="currentColor"/></svg></i>',
+            html: PLAYER_ICONS.next,
             tooltip: '播放下一集',
             click: function () {
               handleNextEpisode();
@@ -1559,6 +1596,15 @@ function PlayPageClient() {
     };
   }, []);
 
+  const LoadingIcon =
+    loadingStage === 'searching'
+      ? Search
+      : loadingStage === 'preferring'
+      ? Gauge
+      : loadingStage === 'fetching'
+      ? Clapperboard
+      : Sparkles;
+
   if (loading) {
     return (
       <PageLayout activePath='/play'>
@@ -1567,12 +1613,7 @@ function PlayPageClient() {
             {/* 动画影院图标 */}
             <div className='relative mb-8'>
               <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
-                <div className='text-white text-4xl'>
-                  {loadingStage === 'searching' && '🔍'}
-                  {loadingStage === 'preferring' && '⚡'}
-                  {loadingStage === 'fetching' && '🎬'}
-                  {loadingStage === 'ready' && '✨'}
-                </div>
+                <LoadingIcon className='h-10 w-10 text-white' />
                 {/* 旋转光环 */}
                 <div className='absolute -inset-2 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl opacity-20 animate-spin'></div>
               </div>
@@ -1659,7 +1700,7 @@ function PlayPageClient() {
             {/* 错误图标 */}
             <div className='relative mb-8'>
               <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-red-500 to-orange-500 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
-                <div className='text-white text-4xl'>😵</div>
+                <CircleAlert className='h-10 w-10 text-white' />
                 {/* 脉冲效果 */}
                 <div className='absolute -inset-2 bg-gradient-to-r from-red-500 to-orange-500 rounded-2xl opacity-20 animate-pulse'></div>
               </div>
@@ -1703,14 +1744,24 @@ function PlayPageClient() {
                 }
                 className='w-full px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-medium hover:from-green-600 hover:to-emerald-700 transform hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-xl'
               >
-                {videoTitle ? '🔍 返回搜索' : '← 返回上页'}
+                <span className='inline-flex items-center justify-center gap-2'>
+                  {videoTitle ? (
+                    <Search className='h-4 w-4' />
+                  ) : (
+                    <ArrowLeft className='h-4 w-4' />
+                  )}
+                  {videoTitle ? '返回搜索' : '返回上页'}
+                </span>
               </button>
 
               <button
                 onClick={() => window.location.reload()}
                 className='w-full px-6 py-3 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-200'
               >
-                🔄 重新尝试
+                <span className='inline-flex items-center justify-center gap-2'>
+                  <RefreshCw className='h-4 w-4' />
+                  重新尝试
+                </span>
               </button>
             </div>
           </div>
@@ -1746,21 +1797,11 @@ function PlayPageClient() {
                 isEpisodeSelectorCollapsed ? '显示选集面板' : '隐藏选集面板'
               }
             >
-              <svg
+              <ChevronRight
                 className={`w-3.5 h-3.5 text-gray-500 dark:text-gray-400 transition-transform duration-200 ${
                   isEpisodeSelectorCollapsed ? 'rotate-180' : 'rotate-0'
                 }`}
-                fill='none'
-                stroke='currentColor'
-                viewBox='0 0 24 24'
-              >
-                <path
-                  strokeLinecap='round'
-                  strokeLinejoin='round'
-                  strokeWidth='2'
-                  d='M9 5l7 7-7 7'
-                />
-              </svg>
+              />
               <span className='text-xs font-medium text-gray-600 dark:text-gray-300'>
                 {isEpisodeSelectorCollapsed ? '显示' : '隐藏'}
               </span>
@@ -1802,7 +1843,7 @@ function PlayPageClient() {
                       {/* 动画影院图标 */}
                       <div className='relative mb-8'>
                         <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
-                          <div className='text-white text-4xl'>🎬</div>
+                          <Clapperboard className='h-10 w-10 text-white' />
                           {/* 旋转光环 */}
                           <div className='absolute -inset-2 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl opacity-20 animate-spin'></div>
                         </div>
@@ -1824,9 +1865,12 @@ function PlayPageClient() {
                       {/* 换源消息 */}
                       <div className='space-y-2'>
                         <p className='text-xl font-semibold text-white animate-pulse'>
-                          {videoLoadingStage === 'sourceChanging'
-                            ? '🔄 切换播放源...'
-                            : '🔄 视频加载中...'}
+                          <span className='inline-flex items-center gap-2'>
+                            <RefreshCw className='h-5 w-5 animate-spin' />
+                            {videoLoadingStage === 'sourceChanging'
+                              ? '切换播放源...'
+                              : '视频加载中...'}
+                          </span>
                         </p>
                       </div>
                     </div>
@@ -1864,23 +1908,31 @@ function PlayPageClient() {
         <div className='grid grid-cols-1 md:grid-cols-4 gap-4'>
           {/* 文字区 */}
           <div className='md:col-span-3'>
-            <div className='p-6 flex flex-col min-h-0'>
+            <div className='app-play-detail-panel p-6 flex flex-col min-h-0'>
               {/* 标题 */}
-              <h1 className='text-3xl font-bold mb-2 tracking-wide flex items-center flex-shrink-0 text-center md:text-left w-full'>
+              <h1 className='app-play-detail-title text-3xl font-bold mb-2 tracking-wide flex items-center flex-shrink-0 text-center md:text-left w-full'>
                 {videoTitle || '影片标题'}
                 <button
+                  type='button'
+                  aria-label={favorited ? '取消收藏' : '收藏影片'}
                   onClick={(e) => {
                     e.stopPropagation();
                     handleToggleFavorite();
                   }}
-                  className='ml-3 flex-shrink-0 hover:opacity-80 transition-opacity'
+                  className='ml-2 flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-full hover:bg-black/5 hover:opacity-80 transition-opacity dark:hover:bg-white/10'
                 >
-                  <FavoriteIcon filled={favorited} />
+                  <Heart
+                    className={`h-7 w-7 ${
+                      favorited
+                        ? 'fill-red-500 text-red-500'
+                        : 'stroke-[1] text-gray-600 dark:text-gray-300'
+                    }`}
+                  />
                 </button>
               </h1>
 
               {/* 关键信息行 */}
-              <div className='flex flex-wrap items-center gap-3 text-base mb-4 opacity-80 flex-shrink-0'>
+              <div className='app-play-detail-meta flex flex-wrap items-center gap-3 text-base mb-4 opacity-80 flex-shrink-0'>
                 {detail?.class && (
                   <span className='text-green-600 font-semibold'>
                     {detail.class}
@@ -1899,7 +1951,7 @@ function PlayPageClient() {
               {/* 剧情简介 */}
               {detail?.desc && (
                 <div
-                  className='mt-0 text-base leading-relaxed opacity-90 overflow-y-auto pr-2 flex-1 min-h-0 scrollbar-hide'
+                  className='app-play-summary mt-0 text-base leading-relaxed opacity-90 overflow-y-auto pr-2 flex-1 min-h-0 scrollbar-hide'
                   style={{ whiteSpace: 'pre-line' }}
                 >
                   {detail.desc}
@@ -1912,11 +1964,12 @@ function PlayPageClient() {
           <div className='hidden md:block md:col-span-1 md:order-first'>
             <div className='pl-0 py-4 pr-6'>
               <div className='bg-gray-300 dark:bg-gray-700 aspect-[2/3] flex items-center justify-center rounded-xl overflow-hidden'>
-                {videoCover ? (
+                {videoCover && !coverLoadFailed ? (
                   <img
                     src={processImageUrl(videoCover)}
                     alt={videoTitle}
                     className='w-full h-full object-cover'
+                    onError={() => setCoverLoadFailed(true)}
                   />
                 ) : (
                   <span className='text-gray-600 dark:text-gray-400'>
@@ -1931,31 +1984,6 @@ function PlayPageClient() {
     </PageLayout>
   );
 }
-
-// FavoriteIcon 组件
-const FavoriteIcon = ({ filled }: { filled: boolean }) => {
-  if (filled) {
-    return (
-      <svg
-        className='h-7 w-7'
-        viewBox='0 0 24 24'
-        xmlns='http://www.w3.org/2000/svg'
-      >
-        <path
-          d='M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'
-          fill='#ef4444' /* Tailwind red-500 */
-          stroke='#ef4444'
-          strokeWidth='2'
-          strokeLinecap='round'
-          strokeLinejoin='round'
-        />
-      </svg>
-    );
-  }
-  return (
-    <Heart className='h-7 w-7 stroke-[1] text-gray-600 dark:text-gray-300' />
-  );
-};
 
 export default function PlayPage() {
   return (

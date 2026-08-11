@@ -57,27 +57,36 @@ const intervalId = setInterval(() => {
 
 // 执行 cron 任务的函数
 function executeCronJob() {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) {
+    console.log('CRON_SECRET is not configured; skip internal cron request.');
+    return;
+  }
   const cronUrl = `http://${process.env.HOSTNAME || 'localhost'}:${
     process.env.PORT || 3000
   }/api/cron`;
 
   console.log(`Executing cron job: ${cronUrl}`);
 
-  const req = http.get(cronUrl, (res) => {
-    let data = '';
+  const req = http.get(
+    cronUrl,
+    { headers: { Authorization: `Bearer ${cronSecret}` } },
+    (res) => {
+      let data = '';
 
-    res.on('data', (chunk) => {
-      data += chunk;
-    });
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
 
-    res.on('end', () => {
-      if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-        console.log('Cron job executed successfully:', data);
-      } else {
-        console.error('Cron job failed:', res.statusCode, data);
-      }
-    });
-  });
+      res.on('end', () => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          console.log('Cron job executed successfully:', data);
+        } else {
+          console.error('Cron job failed:', res.statusCode, data);
+        }
+      });
+    }
+  );
 
   req.on('error', (err) => {
     console.error('Error executing cron job:', err);

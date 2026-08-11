@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 
 import { getAvailableApiSites, getCacheTime } from '@/lib/config';
 import { getDetailFromApi } from '@/lib/downstream';
-
-export const runtime = 'edge';
+import { relayMediaUrls } from '@/lib/media-relay';
+import { getSessionSecret } from '@/lib/session';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -27,6 +27,9 @@ export async function GET(request: Request) {
     }
 
     const result = await getDetailFromApi(apiSite, id);
+    const secret = getSessionSecret();
+    if (!secret) throw new Error('服务器未配置会话密钥');
+    result.episodes = await relayMediaUrls(result.episodes, secret);
     await getCacheTime();
 
     return NextResponse.json(result, {

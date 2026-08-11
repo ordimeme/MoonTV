@@ -1,11 +1,12 @@
 /* eslint-disable no-console */
 import { NextRequest, NextResponse } from 'next/server';
 
+import { AdminConfigConflictError } from '@/lib/admin.types';
 import {
-  checkRateLimit,
-  clearRateLimit,
-  createRateLimitKey,
-  recordRateLimitFailure,
+  checkRateLimits,
+  clearRateLimits,
+  createRateLimitKeys,
+  recordRateLimitAttempts,
   REGISTER_RATE_LIMIT,
 } from '@/lib/auth-rate-limit';
 import { getConfig } from '@/lib/config';
@@ -22,8 +23,6 @@ import {
   getSessionSecret,
 } from '@/lib/session';
 
-export const runtime = 'edge';
-
 // 读取存储类型环境变量，默认 localstorage
 const STORAGE_TYPE =
   (process.env.NEXT_PUBLIC_STORAGE_TYPE as
@@ -34,7 +33,7 @@ const STORAGE_TYPE =
     | undefined) || 'localstorage';
 
 export async function POST(req: NextRequest) {
-  let rateLimitKey = '';
+  let rateLimitKeys: string[] = [];
   try {
     // localstorage 模式下不支持注册
     if (STORAGE_TYPE === 'localstorage') {
@@ -54,12 +53,12 @@ export async function POST(req: NextRequest) {
       username?: unknown;
       password?: unknown;
     }>(req);
-    rateLimitKey = await createRateLimitKey(
+    rateLimitKeys = await createRateLimitKeys(
       req,
       'register',
       typeof username === 'string' ? username : ''
     );
-    const rateLimit = await checkRateLimit(rateLimitKey, REGISTER_RATE_LIMIT);
+    const rateLimit = await checkRateLimits(rateLimitKeys, REGISTER_RATE_LIMIT);
     if (!rateLimit.allowed) {
       return NextResponse.json(
         { error: '注册尝试次数过多，请稍后再试' },
@@ -92,18 +91,26 @@ export async function POST(req: NextRequest) {
       // 检查用户是否已存在
       const exist = await db.checkUserExist(username);
       if (exist) {
-        await recordRateLimitFailure(rateLimitKey, REGISTER_RATE_LIMIT);
+        await recordRateLimitAttempts(rateLimitKeys, REGISTER_RATE_LIMIT);
         return NextResponse.json({ error: '用户已存在' }, { status: 400 });
       }
 
-      await db.registerUser(username, password);
-
-      // 添加到配置中并保存
+      // 先用带版本号的配置写入占位；用户创建失败时立即补偿回滚，
+      // 避免出现用户表与权限配置永久不一致。
       config.UserConfig.Users.push({
         username,
         role: 'user',
       });
       await db.saveAdminConfig(config);
+      try {
+        await db.registerUser(username, password);
+      } catch (error) {
+        config.UserConfig.Users = config.UserConfig.Users.filter(
+          (entry) => entry.username !== username
+        );
+        await db.saveAdminConfig(config);
+        throw error;
+      }
 
       // 注册成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
@@ -118,10 +125,13 @@ export async function POST(req: NextRequest) {
         }),
         authCookieOptions
       );
-      await clearRateLimit(rateLimitKey);
+      await clearRateLimits(rateLimitKeys);
 
       return response;
     } catch (err) {
+      if (err instanceof AdminConfigConflictError) {
+        return NextResponse.json({ error: err.message }, { status: 409 });
+      }
       console.error('数据库注册失败', err);
       return NextResponse.json({ error: '数据库错误' }, { status: 500 });
     }
@@ -131,6 +141,9 @@ export async function POST(req: NextRequest) {
         { error: error.message },
         { status: error.status }
       );
+    }
+    if (error instanceof AdminConfigConflictError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
     }
     console.error('注册接口异常', error);
     return NextResponse.json({ error: '服务器错误' }, { status: 500 });

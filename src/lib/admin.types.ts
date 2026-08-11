@@ -1,4 +1,5 @@
 export interface AdminConfig {
+  Revision?: number;
   SiteConfig: {
     SiteName: string;
     Announcement: string;
@@ -24,6 +25,10 @@ export interface AdminConfig {
     detail?: string;
     from: 'config' | 'custom';
     disabled?: boolean;
+    deleted?: boolean;
+    auditStatus?: 'pending' | 'clean' | 'filterable' | 'blocked';
+    auditNote?: string;
+    auditDate?: string;
   }[];
   CustomCategories: {
     name?: string;
@@ -32,6 +37,13 @@ export interface AdminConfig {
     from: 'config' | 'custom';
     disabled?: boolean;
   }[];
+}
+
+export class AdminConfigConflictError extends Error {
+  constructor() {
+    super('后台配置已被其他操作更新，请刷新后重试');
+    this.name = 'AdminConfigConflictError';
+  }
 }
 
 export interface AdminConfigResult {

@@ -15,37 +15,43 @@ const siteName = process.env.SITE_NAME || 'MoonTV';
 
 // manifest.json 模板
 const manifestTemplate = {
-  "name": siteName,
-  "short_name": siteName,
-  "description": "影视聚合",
-  "start_url": "/",
-  "scope": "/",
-  "display": "standalone",
-  "background_color": "#000000",
-  "apple-mobile-web-app-capable": "yes",
-  "apple-mobile-web-app-status-bar-style": "black",
-  "icons": [
+  name: siteName,
+  short_name: siteName,
+  description: '专注、纯净的私人影视空间',
+  start_url: '/',
+  scope: '/',
+  display: 'standalone',
+  background_color: '#000000',
+  'apple-mobile-web-app-capable': 'yes',
+  'apple-mobile-web-app-status-bar-style': 'black',
+  icons: [
     {
-      "src": "/icons/icon-192x192.png",
-      "sizes": "192x192",
-      "type": "image/png"
+      src: '/brand-mark.svg',
+      sizes: 'any',
+      type: 'image/svg+xml',
+      purpose: 'any maskable',
     },
     {
-      "src": "/icons/icon-256x256.png",
-      "sizes": "256x256",
-      "type": "image/png"
+      src: '/icons/icon-192x192.png',
+      sizes: '192x192',
+      type: 'image/png',
     },
     {
-      "src": "/icons/icon-384x384.png",
-      "sizes": "384x384",
-      "type": "image/png"
+      src: '/icons/icon-256x256.png',
+      sizes: '256x256',
+      type: 'image/png',
     },
     {
-      "src": "/icons/icon-512x512.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    }
-  ]
+      src: '/icons/icon-384x384.png',
+      sizes: '384x384',
+      type: 'image/png',
+    },
+    {
+      src: '/icons/icon-512x512.png',
+      sizes: '512x512',
+      type: 'image/png',
+    },
+  ],
 };
 
 try {
@@ -55,7 +61,10 @@ try {
   }
 
   // 写入 manifest.json
-  fs.writeFileSync(manifestPath, JSON.stringify(manifestTemplate, null, 2));
+  fs.writeFileSync(
+    manifestPath,
+    `${JSON.stringify(manifestTemplate, null, 2)}\n`
+  );
   console.log(`✅ Generated manifest.json with site name: ${siteName}`);
 } catch (error) {
   console.error('❌ Error generating manifest.json:', error);

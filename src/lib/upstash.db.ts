@@ -2,7 +2,7 @@
 
 import { Redis } from '@upstash/redis';
 
-import { AdminConfig } from './admin.types';
+import { AdminConfig, AdminConfigConflictError } from './admin.types';
 import { hashPassword, isPasswordHash, verifyStoredPassword } from './password';
 import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
 
@@ -284,7 +284,35 @@ export class UpstashRedisStorage implements IStorage {
   }
 
   async setAdminConfig(config: AdminConfig): Promise<void> {
-    await withRetry(() => this.client.set(this.adminConfigKey(), config));
+    const key = this.adminConfigKey();
+    const lockKey = `${key}:lock`;
+    const lockToken = crypto.randomUUID();
+    let acquired = false;
+    for (let attempt = 0; attempt < 20 && !acquired; attempt += 1) {
+      const result = await withRetry(() =>
+        this.client.set(lockKey, lockToken, { nx: true, px: 5000 })
+      );
+      acquired = result === 'OK';
+      if (!acquired) await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    if (!acquired) throw new AdminConfigConflictError();
+
+    try {
+      const current = await this.getAdminConfig();
+      const storedRevision = current?.Revision || 0;
+      if (current && (config.Revision || 0) !== storedRevision) {
+        throw new AdminConfigConflictError();
+      }
+      const next = { ...config, Revision: storedRevision + 1 };
+      await withRetry(() => this.client.set(key, next));
+      config.Revision = next.Revision;
+    } finally {
+      await this.client.eval(
+        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+        [lockKey],
+        [lockToken]
+      );
+    }
   }
 
   // ---------- 跳过片头片尾配置 ----------

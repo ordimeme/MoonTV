@@ -22,6 +22,7 @@ function DoubanPageClient() {
   const [currentPage, setCurrentPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [selectorsReady, setSelectorsReady] = useState(false);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadingRef = useRef<HTMLDivElement>(null);
@@ -152,6 +153,7 @@ function DoubanPageClient() {
   const loadInitialData = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadError('');
       let data: DoubanResult;
 
       if (type === 'custom') {
@@ -184,6 +186,9 @@ function DoubanPageClient() {
       }
     } catch (err) {
       console.error(err);
+      setLoadError(err instanceof Error ? err.message : '内容加载失败');
+    } finally {
+      setLoading(false);
     }
   }, [
     type,
@@ -270,6 +275,8 @@ function DoubanPageClient() {
           }
         } catch (err) {
           console.error(err);
+          setLoadError(err instanceof Error ? err.message : '加载更多失败');
+          setHasMore(false);
         } finally {
           setIsLoadingMore(false);
         }
@@ -415,14 +422,29 @@ function DoubanPageClient() {
 
         {/* 内容展示区域 */}
         <div className='max-w-[95%] mx-auto mt-8 overflow-visible'>
+          {loadError && !loading && (
+            <div
+              role='alert'
+              className='mx-auto mb-6 max-w-xl rounded-xl border border-red-200 bg-red-50 p-4 text-center text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300'
+            >
+              <p>{loadError}</p>
+              <button
+                type='button'
+                onClick={() => void loadInitialData()}
+                className='mt-3 min-h-11 rounded-lg bg-red-600 px-4 py-2 font-medium text-white hover:bg-red-700'
+              >
+                重新加载
+              </button>
+            </div>
+          )}
           {/* 内容网格 */}
           <div className='justify-start grid grid-cols-3 gap-x-2 gap-y-12 px-0 sm:px-2 sm:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] sm:gap-x-8 sm:gap-y-20'>
             {loading || !selectorsReady
               ? // 显示骨架屏
                 skeletonData.map((index) => <DoubanCardSkeleton key={index} />)
               : // 显示实际数据
-                doubanData.map((item, index) => (
-                  <div key={`${item.title}-${index}`} className='w-full'>
+                doubanData.map((item) => (
+                  <div key={item.id} className='w-full'>
                     <VideoCard
                       from='douban'
                       title={item.title}
@@ -463,7 +485,7 @@ function DoubanPageClient() {
           )}
 
           {/* 空状态 */}
-          {!loading && doubanData.length === 0 && (
+          {!loading && !loadError && doubanData.length === 0 && (
             <div className='text-center text-gray-500 py-8'>暂无相关内容</div>
           )}
         </div>

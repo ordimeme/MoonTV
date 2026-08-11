@@ -2,7 +2,7 @@
 
 import { createClient, RedisClientType } from 'redis';
 
-import { AdminConfig } from './admin.types';
+import { AdminConfig, AdminConfigConflictError } from './admin.types';
 import { hashPassword, isPasswordHash, verifyStoredPassword } from './password';
 import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
 
@@ -298,9 +298,27 @@ export class RedisStorage implements IStorage {
   }
 
   async setAdminConfig(config: AdminConfig): Promise<void> {
-    await withRetry(() =>
-      this.client.set(this.adminConfigKey(), JSON.stringify(config))
-    );
+    const key = this.adminConfigKey();
+    await withRetry(async () => {
+      await this.client.watch(key);
+      try {
+        const raw = await this.client.get(key);
+        const current = raw ? (JSON.parse(raw) as AdminConfig) : null;
+        const storedRevision = current?.Revision || 0;
+        if (current && (config.Revision || 0) !== storedRevision) {
+          throw new AdminConfigConflictError();
+        }
+        const next = { ...config, Revision: storedRevision + 1 };
+        const result = await this.client
+          .multi()
+          .set(key, JSON.stringify(next))
+          .exec();
+        if (result === null) throw new AdminConfigConflictError();
+        config.Revision = next.Revision;
+      } finally {
+        await this.client.unwatch();
+      }
+    });
   }
 
   // ---------- 跳过片头片尾配置 ----------

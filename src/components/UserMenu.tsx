@@ -7,8 +7,11 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { BRAND_DESCRIPTION } from '@/lib/brand';
+import { clearUserCache } from '@/lib/db.client';
 import { clearPrivateApiCaches, fetchSession } from '@/lib/session.client';
-import { CURRENT_VERSION } from '@/lib/version';
+
+import { PandaMark } from '@/components/BrandLogo';
 
 interface AuthInfo {
   username?: string;
@@ -113,6 +116,7 @@ export const UserMenu: React.FC = () => {
   };
 
   const handleLogout = async () => {
+    clearUserCache();
     try {
       await fetch('/api/logout', {
         method: 'POST',
@@ -122,7 +126,7 @@ export const UserMenu: React.FC = () => {
       console.error('注销请求失败:', error);
     }
     await clearPrivateApiCaches();
-    window.location.href = '/';
+    window.location.replace('/login');
   };
 
   const handleAdminPanel = () => {
@@ -380,17 +384,10 @@ export const UserMenu: React.FC = () => {
           {/* 分割线 */}
           <div className='my-1 border-t border-gray-200 dark:border-gray-700'></div>
 
-          {/* 版本信息 */}
-          <button
-            onClick={() =>
-              window.open('https://github.com/senshinya/MoonTV', '_blank')
-            }
-            className='w-full px-3 py-2 text-center flex items-center justify-center text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors text-xs'
-          >
-            <div className='flex items-center gap-1'>
-              <span className='font-mono'>v{CURRENT_VERSION}</span>
-            </div>
-          </button>
+          <div className='flex items-center justify-center gap-2 px-3 py-2 text-center text-xs text-gray-500 dark:text-gray-400'>
+            <PandaMark className='h-5 w-5 text-green-600' />
+            <span>{BRAND_DESCRIPTION}</span>
+          </div>
         </div>
       </div>
     </>

@@ -2,13 +2,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
+import { AdminConfigConflictError } from '@/lib/admin.types';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
 import { getStorage } from '@/lib/db';
 import { readLimitedJson } from '@/lib/request-security';
 import { IStorage } from '@/lib/types';
-
-export const runtime = 'edge';
 
 // 支持的操作类型
 type Action = 'add' | 'disable' | 'enable' | 'delete' | 'sort';
@@ -204,6 +203,9 @@ export async function POST(request: NextRequest) {
       }
     );
   } catch (error) {
+    if (error instanceof AdminConfigConflictError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     console.error('分类管理操作失败:', error);
     return NextResponse.json(
       {

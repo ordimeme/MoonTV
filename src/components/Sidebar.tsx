@@ -2,7 +2,15 @@
 
 'use client';
 
-import { Clover, Film, Home, Menu, Search, Star, Tv } from 'lucide-react';
+import {
+  Clapperboard,
+  House,
+  Library,
+  Menu,
+  Search,
+  Sparkles,
+  Tv,
+} from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -14,7 +22,7 @@ import {
   useState,
 } from 'react';
 
-import { useSite } from './SiteProvider';
+import BrandLogo from './BrandLogo';
 
 interface SidebarContextType {
   isCollapsed: boolean;
@@ -25,21 +33,6 @@ const SidebarContext = createContext<SidebarContextType>({
 });
 
 export const useSidebar = () => useContext(SidebarContext);
-
-// 可替换为你自己的 logo 图片
-const Logo = () => {
-  const { siteName } = useSite();
-  return (
-    <Link
-      href='/'
-      className='flex items-center justify-center h-16 select-none hover:opacity-80 transition-opacity duration-200'
-    >
-      <span className='text-2xl font-bold text-green-600 tracking-tight'>
-        {siteName}
-      </span>
-    </Link>
-  );
-};
 
 interface SidebarProps {
   onToggle?: (collapsed: boolean) => void;
@@ -126,7 +119,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
 
   const [menuItems, setMenuItems] = useState([
     {
-      icon: Film,
+      icon: Clapperboard,
       label: '电影',
       href: '/douban?type=movie',
     },
@@ -136,7 +129,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
       href: '/douban?type=tv',
     },
     {
-      icon: Clover,
+      icon: Sparkles,
       label: '综艺',
       href: '/douban?type=show',
     },
@@ -148,7 +141,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
       setMenuItems((prevItems) => [
         ...prevItems,
         {
-          icon: Star,
+          icon: Library,
           label: '自定义',
           href: '/douban?type=custom',
         },
@@ -179,12 +172,14 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                 }`}
               >
                 <div className='w-[calc(100%-4rem)] flex justify-center'>
-                  {!isCollapsed && <Logo />}
+                  {!isCollapsed && <BrandLogo className='text-xl' />}
                 </div>
               </div>
               <button
+                type='button'
+                aria-label={isCollapsed ? '展开侧边栏' : '收起侧边栏'}
                 onClick={handleToggle}
-                className={`absolute top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-8 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100/50 transition-colors duration-200 z-10 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-700/50 ${
+                className={`absolute top-1/2 -translate-y-1/2 flex items-center justify-center w-11 h-11 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-gray-100/50 transition-colors duration-200 z-10 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-700/50 ${
                   isCollapsed ? 'left-1/2 -translate-x-1/2' : 'right-2'
                 }`}
               >
@@ -203,7 +198,7 @@ const Sidebar = ({ onToggle, activePath = '/' }: SidebarProps) => {
                 } gap-3 justify-start`}
               >
                 <div className='w-4 h-4 flex items-center justify-center'>
-                  <Home className='h-4 w-4 text-gray-500 group-hover:text-green-600 data-[active=true]:text-green-700 dark:text-gray-400 dark:group-hover:text-green-400 dark:data-[active=true]:text-green-400' />
+                  <House className='h-4 w-4 text-gray-500 group-hover:text-green-600 data-[active=true]:text-green-700 dark:text-gray-400 dark:group-hover:text-green-400 dark:data-[active=true]:text-green-400' />
                 </div>
                 {!isCollapsed && (
                   <span className='whitespace-nowrap transition-opacity duration-200 opacity-100'>

@@ -15,6 +15,7 @@ import {
 import {
   isSafeUpstreamUrl,
   readJsonResponseLimited,
+  readTextResponseLimited,
 } from '../upstream-security';
 
 Object.defineProperty(globalThis, 'TextEncoder', { value: TextEncoder });
@@ -70,6 +71,17 @@ describe('security helpers', () => {
   it('allows eval only for the local development bundle', () => {
     expect(buildContentSecurityPolicy(true)).toContain("'unsafe-eval'");
     expect(buildContentSecurityPolicy(false)).not.toContain("'unsafe-eval'");
+    expect(buildContentSecurityPolicy(false)).not.toContain(
+      "script-src 'self' 'unsafe-inline'"
+    );
+    expect(buildContentSecurityPolicy(false)).toContain("connect-src 'self'");
+  });
+
+  it('allows only nonce-bearing inline scripts in production', () => {
+    const policy = buildContentSecurityPolicy(false, 'test-nonce');
+    expect(policy).toContain("'nonce-test-nonce'");
+    expect(policy).toContain("'strict-dynamic'");
+    expect(policy).not.toContain("script-src 'self' 'unsafe-inline'");
   });
 
   it('limits and validates JSON request bodies', async () => {
@@ -141,6 +153,15 @@ describe('security helpers', () => {
     ).resolves.toEqual({ ok: true });
     await expect(
       readJsonResponseLimited(responseWithBody('x'.repeat(65)), 64)
+    ).rejects.toThrow('上游响应过大');
+  });
+
+  it('caps upstream text responses', async () => {
+    await expect(
+      readTextResponseLimited(responseWithBody('safe'), 8)
+    ).resolves.toBe('safe');
+    await expect(
+      readTextResponseLimited(responseWithBody('x'.repeat(9)), 8)
     ).rejects.toThrow('上游响应过大');
   });
 });

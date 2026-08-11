@@ -6,6 +6,7 @@ import {
   checkRateLimit,
   clearRateLimit,
   createRateLimitKey,
+  createRateLimitKeys,
   LOGIN_RATE_LIMIT,
   recordRateLimitFailure,
 } from '../auth-rate-limit';
@@ -39,5 +40,23 @@ describe('authentication rate limiting', () => {
       checkRateLimit(key, LOGIN_RATE_LIMIT, 2_000)
     ).resolves.toMatchObject({ allowed: false });
     await clearRateLimit(key);
+  });
+
+  it('creates a shared per-address bucket in addition to an identity bucket', async () => {
+    const request = {
+      headers: {
+        get(name: string) {
+          return name.toLowerCase() === 'cf-connecting-ip'
+            ? '203.0.113.8'
+            : null;
+        },
+      },
+    } as Request;
+    const alice = await createRateLimitKeys(request, 'login', 'alice');
+    const bob = await createRateLimitKeys(request, 'login', 'bob');
+    expect(alice).toHaveLength(2);
+    expect(bob).toHaveLength(2);
+    expect(alice[0]).toBe(bob[0]);
+    expect(alice[1]).not.toBe(bob[1]);
   });
 });
