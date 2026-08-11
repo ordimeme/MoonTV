@@ -33,8 +33,20 @@ export interface RateLimitStatus {
   retryAfterSeconds: number;
 }
 
+export interface RateLimitTarget {
+  key: string;
+  kind: 'address' | 'identity';
+  policy: RateLimitPolicy;
+}
+
 export const LOGIN_RATE_LIMIT: RateLimitPolicy = {
   maxAttempts: 5,
+  windowMs: 10 * 60 * 1000,
+  blockMs: 15 * 60 * 1000,
+};
+
+export const LOGIN_ADDRESS_RATE_LIMIT: RateLimitPolicy = {
+  maxAttempts: 30,
   windowMs: 10 * 60 * 1000,
   blockMs: 15 * 60 * 1000,
 };
@@ -156,6 +168,73 @@ export async function createRateLimitKeys(
   if (!identity.trim()) return [addressKey];
   const identityKey = await createRateLimitKey(request, scope, identity);
   return identityKey === addressKey ? [addressKey] : [addressKey, identityKey];
+}
+
+export async function createLoginRateLimitTargets(
+  request: Request,
+  identity = ''
+): Promise<RateLimitTarget[]> {
+  const normalizedIdentity = identity.trim();
+  const addressTarget: RateLimitTarget = {
+    key: await createRateLimitKey(request, 'login-v2-address'),
+    kind: 'address',
+    policy: normalizedIdentity ? LOGIN_ADDRESS_RATE_LIMIT : LOGIN_RATE_LIMIT,
+  };
+  if (!normalizedIdentity) return [addressTarget];
+  return [
+    addressTarget,
+    {
+      key: await createRateLimitKey(
+        request,
+        'login-v2-identity',
+        normalizedIdentity
+      ),
+      kind: 'identity',
+      policy: LOGIN_RATE_LIMIT,
+    },
+  ];
+}
+
+export async function checkRateLimitTargets(
+  targets: RateLimitTarget[]
+): Promise<RateLimitStatus> {
+  const statuses = await Promise.all(
+    targets.map((target) => checkRateLimit(target.key, target.policy))
+  );
+  return statuses.reduce<RateLimitStatus>(
+    (result, status) =>
+      status.allowed
+        ? result
+        : {
+            allowed: false,
+            retryAfterSeconds: Math.max(
+              result.retryAfterSeconds,
+              status.retryAfterSeconds
+            ),
+          },
+    { allowed: true, retryAfterSeconds: 0 }
+  );
+}
+
+export async function recordRateLimitTargetFailures(
+  targets: RateLimitTarget[]
+): Promise<void> {
+  await Promise.all(
+    targets.map((target) => recordRateLimitFailure(target.key, target.policy))
+  );
+}
+
+export async function clearSuccessfulLoginRateLimits(
+  targets: RateLimitTarget[]
+): Promise<void> {
+  const identityTargets = targets.filter(
+    (target) => target.kind === 'identity'
+  );
+  await Promise.all(
+    (identityTargets.length > 0 ? identityTargets : targets).map((target) =>
+      clearRateLimit(target.key)
+    )
+  );
 }
 
 export async function checkRateLimits(

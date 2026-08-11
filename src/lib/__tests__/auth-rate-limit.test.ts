@@ -4,11 +4,15 @@ import { webcrypto } from 'node:crypto';
 
 import {
   checkRateLimit,
+  checkRateLimitTargets,
   clearRateLimit,
+  createLoginRateLimitTargets,
   createRateLimitKey,
   createRateLimitKeys,
+  LOGIN_ADDRESS_RATE_LIMIT,
   LOGIN_RATE_LIMIT,
   recordRateLimitFailure,
+  recordRateLimitTargetFailures,
 } from '../auth-rate-limit';
 
 Object.defineProperty(globalThis, 'crypto', { value: webcrypto });
@@ -58,5 +62,45 @@ describe('authentication rate limiting', () => {
     expect(bob).toHaveLength(2);
     expect(alice[0]).toBe(bob[0]);
     expect(alice[1]).not.toBe(bob[1]);
+  });
+
+  it('does not let one account exhaust every account on the same address', async () => {
+    const request = {
+      headers: {
+        get(name: string) {
+          return name.toLowerCase() === 'cf-connecting-ip'
+            ? '203.0.113.9'
+            : null;
+        },
+      },
+    } as Request;
+    const alice = await createLoginRateLimitTargets(request, 'alice');
+    const bob = await createLoginRateLimitTargets(request, 'bob');
+
+    expect(alice.map((target) => target.policy.maxAttempts)).toEqual([
+      LOGIN_ADDRESS_RATE_LIMIT.maxAttempts,
+      LOGIN_RATE_LIMIT.maxAttempts,
+    ]);
+    expect(alice[0].key).toBe(bob[0].key);
+    expect(alice[1].key).not.toBe(bob[1].key);
+
+    for (
+      let attempt = 0;
+      attempt < LOGIN_RATE_LIMIT.maxAttempts;
+      attempt += 1
+    ) {
+      await recordRateLimitTargetFailures(alice);
+    }
+
+    await expect(checkRateLimitTargets(alice)).resolves.toMatchObject({
+      allowed: false,
+    });
+    await expect(checkRateLimitTargets(bob)).resolves.toMatchObject({
+      allowed: true,
+    });
+
+    await Promise.all(
+      [...alice, ...bob].map((target) => clearRateLimit(target.key))
+    );
   });
 });

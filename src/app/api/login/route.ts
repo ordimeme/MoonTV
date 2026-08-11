@@ -2,11 +2,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import {
-  checkRateLimits,
-  clearRateLimits,
-  createRateLimitKeys,
-  LOGIN_RATE_LIMIT,
-  recordRateLimitAttempts,
+  checkRateLimitTargets,
+  clearSuccessfulLoginRateLimits,
+  createLoginRateLimitTargets,
+  RateLimitTarget,
+  recordRateLimitTargetFailures,
 } from '@/lib/auth-rate-limit';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
@@ -49,15 +49,15 @@ async function setSessionCookie(
 }
 
 export async function POST(req: NextRequest) {
-  let rateLimitKeys: string[] = [];
+  let rateLimitTargets: RateLimitTarget[] = [];
   try {
     const body = await readLimitedJson<{
       username?: unknown;
       password?: unknown;
     }>(req);
     const identity = typeof body.username === 'string' ? body.username : '';
-    rateLimitKeys = await createRateLimitKeys(req, 'login', identity);
-    const rateLimit = await checkRateLimits(rateLimitKeys, LOGIN_RATE_LIMIT);
+    rateLimitTargets = await createLoginRateLimitTargets(req, identity);
+    const rateLimit = await checkRateLimitTargets(rateLimitTargets);
     if (!rateLimit.allowed) {
       return NextResponse.json(
         { error: '尝试次数过多，请稍后再试' },
@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (password !== envPassword) {
-        await recordRateLimitAttempts(rateLimitKeys, LOGIN_RATE_LIMIT);
+        await recordRateLimitTargetFailures(rateLimitTargets);
         return NextResponse.json(
           { ok: false, error: '密码错误' },
           { status: 401 }
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       await setSessionCookie(response, 'user');
-      await clearRateLimits(rateLimitKeys);
+      await clearSuccessfulLoginRateLimits(rateLimitTargets);
 
       return response;
     }
@@ -125,18 +125,18 @@ export async function POST(req: NextRequest) {
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       await setSessionCookie(response, 'owner', username);
-      await clearRateLimits(rateLimitKeys);
+      await clearSuccessfulLoginRateLimits(rateLimitTargets);
 
       return response;
     } else if (username === process.env.USERNAME) {
-      await recordRateLimitAttempts(rateLimitKeys, LOGIN_RATE_LIMIT);
+      await recordRateLimitTargetFailures(rateLimitTargets);
       return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
     }
 
     const config = await getConfig();
     const user = config.UserConfig.Users.find((u) => u.username === username);
     if (user && user.banned) {
-      await recordRateLimitAttempts(rateLimitKeys, LOGIN_RATE_LIMIT);
+      await recordRateLimitTargetFailures(rateLimitTargets);
       return NextResponse.json({ error: '用户被封禁' }, { status: 401 });
     }
 
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
     try {
       const pass = await db.verifyUser(username, password);
       if (!pass) {
-        await recordRateLimitAttempts(rateLimitKeys, LOGIN_RATE_LIMIT);
+        await recordRateLimitTargetFailures(rateLimitTargets);
         return NextResponse.json(
           { error: '用户名或密码错误' },
           { status: 401 }
@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
       // 验证成功，设置认证cookie
       const response = NextResponse.json({ ok: true });
       await setSessionCookie(response, user?.role || 'user', username);
-      await clearRateLimits(rateLimitKeys);
+      await clearSuccessfulLoginRateLimits(rateLimitTargets);
 
       return response;
     } catch (err) {
