@@ -1,4 +1,4 @@
-export type SourceAuditStatus = 'clean' | 'filterable' | 'blocked';
+export type SourceAuditStatus = 'pending' | 'clean' | 'filterable' | 'blocked';
 
 export interface SourceAuditPolicy {
   status: SourceAuditStatus;
@@ -6,7 +6,7 @@ export interface SourceAuditPolicy {
   note: string;
 }
 
-export const SOURCE_AUDIT_DATE = '2026-08-11';
+export const SOURCE_AUDIT_DATE = '2026-08-12';
 export const SOURCE_AUDIT_MAX_AGE_DAYS = 30;
 
 export function isSourceAuditFresh(
@@ -20,93 +20,65 @@ export function isSourceAuditFresh(
   return timestamp <= now && now - timestamp <= maxAge;
 }
 
-const FILTERABLE_NOTE = '检测到可识别的短插播段，已启用清单级过滤';
-const CLEAN_NOTE = '抽样播放清单未发现独立插播广告段';
+const CLEAN_NOTE = '复审取得可用播放样本，未发现独立插播广告段';
+const PENDING_NOTE = '本次复审未取得有效播放样本，需由站长结合连通性决定';
 
 const SOURCE_AUDIT_POLICIES: Record<string, SourceAuditPolicy> = {
-  dyttzy: {
-    status: 'filterable',
-    defaultDisabled: false,
-    note: FILTERABLE_NOTE,
-  },
-  zy360: {
-    status: 'filterable',
-    defaultDisabled: false,
-    note: FILTERABLE_NOTE,
-  },
-  mdzy: { status: 'filterable', defaultDisabled: false, note: FILTERABLE_NOTE },
-  ikun: { status: 'filterable', defaultDisabled: false, note: FILTERABLE_NOTE },
+  dyttzy: { status: 'clean', defaultDisabled: false, note: CLEAN_NOTE },
+  ruyi: { status: 'clean', defaultDisabled: false, note: CLEAN_NOTE },
+  zy360: { status: 'clean', defaultDisabled: false, note: CLEAN_NOTE },
+  maotaizy: { status: 'clean', defaultDisabled: false, note: CLEAN_NOTE },
   jisu: { status: 'clean', defaultDisabled: false, note: CLEAN_NOTE },
+  dbzy: { status: 'clean', defaultDisabled: false, note: CLEAN_NOTE },
+  mdzy: { status: 'clean', defaultDisabled: false, note: CLEAN_NOTE },
+  zuid: { status: 'clean', defaultDisabled: false, note: CLEAN_NOTE },
+  yinghua: { status: 'clean', defaultDisabled: false, note: CLEAN_NOTE },
   wujin: { status: 'clean', defaultDisabled: false, note: CLEAN_NOTE },
-  ruyi: {
-    status: 'blocked',
-    defaultDisabled: true,
-    note: '播放清单存在高频断点，无法可靠区分正片和广告',
-  },
-  zuid: {
-    status: 'blocked',
-    defaultDisabled: true,
-    note: '播放清单存在高频断点，无法可靠区分正片和广告',
-  },
+  ikun: { status: 'clean', defaultDisabled: false, note: CLEAN_NOTE },
   bfzy: {
-    status: 'blocked',
+    status: 'pending',
     defaultDisabled: true,
-    note: '播放清单连接异常，无法完成广告审计',
+    note: PENDING_NOTE,
   },
   ffzy: {
-    status: 'blocked',
+    status: 'pending',
     defaultDisabled: true,
-    note: '播放清单连接异常，无法完成广告审计',
+    note: PENDING_NOTE,
   },
   heimuer: {
-    status: 'blocked',
+    status: 'pending',
     defaultDisabled: true,
-    note: '视频源 TLS 连接异常，无法完成广告审计',
+    note: PENDING_NOTE,
   },
   mozhua: {
-    status: 'blocked',
+    status: 'pending',
     defaultDisabled: true,
-    note: '视频源 TLS 连接异常，无法完成广告审计',
+    note: PENDING_NOTE,
   },
   xiaomaomi: {
-    status: 'blocked',
+    status: 'pending',
     defaultDisabled: true,
-    note: '视频源证书异常，无法安全完成广告审计',
+    note: PENDING_NOTE,
   },
   tyyszy: {
-    status: 'blocked',
+    status: 'pending',
     defaultDisabled: true,
-    note: '抽样查询无有效结果，暂时禁用',
-  },
-  maotaizy: {
-    status: 'blocked',
-    defaultDisabled: true,
-    note: '抽样查询无有效结果，暂时禁用',
+    note: PENDING_NOTE,
   },
   wolong: {
-    status: 'blocked',
+    status: 'pending',
     defaultDisabled: true,
-    note: '抽样响应格式异常，无法完成广告审计',
-  },
-  dbzy: {
-    status: 'blocked',
-    defaultDisabled: true,
-    note: '抽样查询无有效结果，暂时禁用',
-  },
-  yinghua: {
-    status: 'blocked',
-    defaultDisabled: true,
-    note: '视频源连接异常，无法完成广告审计',
+    note: PENDING_NOTE,
   },
   wwzy: {
-    status: 'blocked',
+    status: 'pending',
     defaultDisabled: true,
-    note: '专用短剧源无法用统一样本完成广告审计',
+    note: PENDING_NOTE,
   },
   lzi: {
-    status: 'blocked',
+    status: 'pending',
     defaultDisabled: true,
-    note: '视频源连接异常，无法完成广告审计',
+    note: PENDING_NOTE,
   },
 };
 

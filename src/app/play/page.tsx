@@ -32,6 +32,7 @@ import {
   subscribeToDataUpdates,
 } from '@/lib/db.client';
 import { filterInterstitialAdsFromM3U8 } from '@/lib/m3u8-ad-filter';
+import { matchPlayableSources } from '@/lib/media-match';
 import { PLAYER_ICONS } from '@/lib/player-icons';
 import { SearchResult } from '@/lib/types';
 import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
@@ -612,18 +613,13 @@ function PlayPageClient() {
         }
         const data = await response.json();
 
-        // 处理搜索结果，根据规则过滤
-        const results = data.results.filter(
-          (result: SearchResult) =>
-            result.title.replaceAll(' ', '').toLowerCase() ===
-              videoTitleRef.current.replaceAll(' ', '').toLowerCase() &&
-            (videoYearRef.current
-              ? result.year.toLowerCase() === videoYearRef.current.toLowerCase()
-              : true) &&
-            (searchType
-              ? (searchType === 'tv' && result.episodes.length > 1) ||
-                (searchType === 'movie' && result.episodes.length === 1)
-              : true)
+        // 海报数据与视频源的年份、分类经常不完全一致。以标题为核心匹配，
+        // 年份和类型仅用于排序，避免有资源却被错误判定为“未找到”。
+        const results = matchPlayableSources(
+          data.results,
+          query || videoTitleRef.current,
+          videoYearRef.current,
+          searchType === 'movie' || searchType === 'tv' ? searchType : ''
         );
         setAvailableSources(results);
         return results;

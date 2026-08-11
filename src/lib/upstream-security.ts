@@ -1,5 +1,6 @@
 const MAX_UPSTREAM_URL_LENGTH = 2048;
 export const MAX_UPSTREAM_JSON_BYTES = 2 * 1024 * 1024;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 function isBlockedIpv4(hostname: string): boolean {
   const parts = hostname.split('.').map(Number);
@@ -23,7 +24,10 @@ function isBlockedIpv4(hostname: string): boolean {
   );
 }
 
-export function isSafeUpstreamUrl(value: unknown): value is string {
+function isSafePublicHttpsUrl(
+  value: unknown,
+  allowSearchParams: boolean
+): value is string {
   if (
     typeof value !== 'string' ||
     value.length === 0 ||
@@ -38,7 +42,7 @@ export function isSafeUpstreamUrl(value: unknown): value is string {
       url.protocol === 'https:' &&
       !url.username &&
       !url.password &&
-      !url.search &&
+      (allowSearchParams || !url.search) &&
       !url.hash &&
       Boolean(hostname) &&
       hostname !== 'localhost' &&
@@ -51,6 +55,38 @@ export function isSafeUpstreamUrl(value: unknown): value is string {
   } catch {
     return false;
   }
+}
+
+export function isSafeUpstreamUrl(value: unknown): value is string {
+  return isSafePublicHttpsUrl(value, false);
+}
+
+export function isSafeUpstreamRequestUrl(value: unknown): value is string {
+  return isSafePublicHttpsUrl(value, true);
+}
+
+export async function fetchSafeUpstream(
+  url: string,
+  init: RequestInit = {},
+  maxRedirects = 3
+): Promise<Response> {
+  let current = url;
+  for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
+    if (!isSafeUpstreamRequestUrl(current)) {
+      throw new Error('上游地址不安全');
+    }
+    const response = await fetch(current, { ...init, redirect: 'manual' });
+    if (!REDIRECT_STATUSES.has(response.status)) return response;
+
+    const location = response.headers.get('location');
+    if (!location) throw new Error('上游返回无效跳转');
+    const next = new URL(location, current).toString();
+    if (!isSafeUpstreamRequestUrl(next)) {
+      throw new Error('上游跳转地址不安全');
+    }
+    current = next;
+  }
+  throw new Error('上游跳转次数过多');
 }
 
 export async function readJsonResponseLimited<T>(

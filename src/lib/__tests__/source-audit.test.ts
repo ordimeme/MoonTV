@@ -1,7 +1,10 @@
 /** @jest-environment node */
 
-import { isSourceAuditFresh } from '../source-audit';
-import { setSourceEnabled } from '../source-management';
+import { getSourceAuditPolicy, isSourceAuditFresh } from '../source-audit';
+import {
+  isSourceEnabledForRuntime,
+  setSourceEnabled,
+} from '../source-management';
 
 describe('source audit expiry', () => {
   it('expires stale or future audit snapshots', () => {
@@ -10,6 +13,17 @@ describe('source audit expiry', () => {
     expect(isSourceAuditFresh('2026-06-01', now)).toBe(false);
     expect(isSourceAuditFresh('2026-08-12', now)).toBe(false);
     expect(isSourceAuditFresh(undefined, now)).toBe(false);
+  });
+
+  it('keeps confirmed sources usable and inconclusive checks pending', () => {
+    expect(getSourceAuditPolicy('ruyi')).toMatchObject({
+      status: 'clean',
+      defaultDisabled: false,
+    });
+    expect(getSourceAuditPolicy('heimuer')).toMatchObject({
+      status: 'pending',
+      defaultDisabled: true,
+    });
   });
 });
 
@@ -36,5 +50,13 @@ describe('source owner decision', () => {
     const source = makeSource();
     expect(setSourceEnabled(source, true, true)).toBe('updated');
     expect(source.disabled).toBe(false);
+    expect(isSourceEnabledForRuntime(source)).toBe(true);
+  });
+
+  it('still blocks unsafe upstream addresses regardless of owner choice', () => {
+    const source = makeSource();
+    source.disabled = false;
+    source.api = 'http://127.0.0.1/private';
+    expect(isSourceEnabledForRuntime(source)).toBe(false);
   });
 });

@@ -13,6 +13,8 @@ import {
   serializeForInlineScript,
 } from '../security';
 import {
+  fetchSafeUpstream,
+  isSafeUpstreamRequestUrl,
   isSafeUpstreamUrl,
   readJsonResponseLimited,
   readTextResponseLimited,
@@ -51,6 +53,18 @@ function responseWithBody(value: string): Response {
   return {
     body: bodyStream(value),
     headers: headers(),
+  } as unknown as Response;
+}
+
+function responseWithStatus(
+  status: number,
+  values: Record<string, string> = {}
+): Response {
+  return {
+    body: null,
+    headers: headers(values),
+    ok: status >= 200 && status < 300,
+    status,
   } as unknown as Response;
 }
 
@@ -142,6 +156,54 @@ describe('security helpers', () => {
     expect(isSafeUpstreamUrl('https://api.example.com/vod?token=secret')).toBe(
       false
     );
+  });
+
+  it('allows safe request query parameters but rejects unsafe redirect targets', () => {
+    expect(
+      isSafeUpstreamRequestUrl('https://api.example.com/vod?wd=test')
+    ).toBe(true);
+    expect(isSafeUpstreamRequestUrl('https://127.0.0.1/vod?wd=test')).toBe(
+      false
+    );
+  });
+
+  it('follows only validated HTTPS redirects', async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        responseWithStatus(302, {
+          location: 'https://cdn.example.com/result?q=test',
+        })
+      )
+      .mockResolvedValueOnce(responseWithStatus(200));
+    globalThis.fetch = fetchMock;
+    try {
+      const response = await fetchSafeUpstream(
+        'https://api.example.com/search?q=test'
+      );
+      expect(response.status).toBe(200);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[0][1]?.redirect).toBe('manual');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('rejects redirects to private network addresses', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = jest.fn().mockResolvedValue(
+      responseWithStatus(302, {
+        location: 'https://127.0.0.1/private',
+      })
+    );
+    try {
+      await expect(
+        fetchSafeUpstream('https://api.example.com/search?q=test')
+      ).rejects.toThrow('上游跳转地址不安全');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('caps upstream JSON responses', async () => {

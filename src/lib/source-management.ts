@@ -1,8 +1,20 @@
 import { AdminConfig } from './admin.types';
+import { isSafeUpstreamUrl } from './upstream-security';
 
 export type DeleteSourceResult = 'deleted' | 'not_found' | 'owner_required';
 
 export type SourceEnableResult = 'updated' | 'owner_required';
+
+export function isSourceEnabledForRuntime(
+  source: AdminConfig['SourceConfig'][number]
+): boolean {
+  return Boolean(
+    !source.disabled &&
+      !source.deleted &&
+      isSafeUpstreamUrl(source.api) &&
+      (!source.detail || isSafeUpstreamUrl(source.detail))
+  );
+}
 
 export function setSourceEnabled(
   source: AdminConfig['SourceConfig'][number],

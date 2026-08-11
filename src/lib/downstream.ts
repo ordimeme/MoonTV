@@ -1,6 +1,7 @@
 import { API_CONFIG, ApiSite, getConfig } from '@/lib/config';
 import { SearchResult } from '@/lib/types';
 import {
+  fetchSafeUpstream,
   isSafeUpstreamUrl,
   readJsonResponseLimited,
   readTextResponseLimited,
@@ -40,9 +41,8 @@ export async function searchFromApi(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-    const response = await fetch(apiUrl, {
+    const response = await fetchSafeUpstream(apiUrl, {
       headers: API_CONFIG.search.headers,
-      redirect: 'error',
       signal: controller.signal,
     });
 
@@ -132,9 +132,8 @@ export async function searchFromApi(
               8000
             );
 
-            const pageResponse = await fetch(pageUrl, {
+            const pageResponse = await fetchSafeUpstream(pageUrl, {
               headers: API_CONFIG.search.headers,
-              redirect: 'error',
               signal: pageController.signal,
             });
 
@@ -227,9 +226,8 @@ export async function getDetailFromApi(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-  const response = await fetch(detailUrl, {
+  const response = await fetchSafeUpstream(detailUrl, {
     headers: API_CONFIG.detail.headers,
-    redirect: 'error',
     signal: controller.signal,
   });
 
@@ -303,9 +301,8 @@ async function handleSpecialSourceDetail(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-  const response = await fetch(detailUrl, {
+  const response = await fetchSafeUpstream(detailUrl, {
     headers: API_CONFIG.detail.headers,
-    redirect: 'error',
     signal: controller.signal,
   });
 

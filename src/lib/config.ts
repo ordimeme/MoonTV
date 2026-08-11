@@ -9,7 +9,7 @@ import {
   isSourceAuditFresh,
   SOURCE_AUDIT_DATE,
 } from './source-audit';
-import { isSafeUpstreamUrl } from './upstream-security';
+import { isSourceEnabledForRuntime } from './source-management';
 
 export interface ApiSite {
   key: string;
@@ -80,12 +80,8 @@ function buildRuntimeSource(
     api: site.api,
     detail: site.detail,
     from: 'config',
-    disabled: Boolean(
-      existing?.disabled ||
-        auditStatus === 'blocked' ||
-        auditStatus === 'pending' ||
-        !auditIsFresh
-    ),
+    // 抽检只提供建议，不能覆盖站长已经作出的启用/禁用决定。
+    disabled: existing?.disabled ?? policy?.defaultDisabled ?? true,
     deleted: existing?.deleted || false,
     auditStatus: auditIsFresh ? auditStatus : 'pending',
     auditNote: auditIsFresh
@@ -481,15 +477,7 @@ export async function getCacheTime(): Promise<number> {
 
 export async function getAvailableApiSites(): Promise<ApiSite[]> {
   const config = await getConfig();
-  return config.SourceConfig.filter(
-    (s) =>
-      !s.disabled &&
-      !s.deleted &&
-      (s.auditStatus === 'clean' || s.auditStatus === 'filterable') &&
-      isSourceAuditFresh(s.auditDate) &&
-      isSafeUpstreamUrl(s.api) &&
-      (!s.detail || isSafeUpstreamUrl(s.detail))
-  ).map((s) => ({
+  return config.SourceConfig.filter(isSourceEnabledForRuntime).map((s) => ({
     key: s.key,
     name: s.name,
     api: s.api,

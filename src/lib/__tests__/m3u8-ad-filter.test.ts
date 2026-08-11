@@ -60,17 +60,17 @@ describe('M3U8 interstitial filtering', () => {
 });
 
 describe('source audit policies', () => {
-  it('blocks sources that cannot be safely filtered', () => {
+  it('keeps sources that passed the latest playable-manifest review available', () => {
     expect(getSourceAuditPolicy('ruyi')).toMatchObject({
-      status: 'blocked',
-      defaultDisabled: true,
+      status: 'clean',
+      defaultDisabled: false,
     });
   });
 
-  it('keeps sources with filterable interstitials available', () => {
-    expect(getSourceAuditPolicy('dyttzy')).toMatchObject({
-      status: 'filterable',
-      defaultDisabled: false,
+  it('keeps inconclusive sources disabled until the owner decides', () => {
+    expect(getSourceAuditPolicy('heimuer')).toMatchObject({
+      status: 'pending',
+      defaultDisabled: true,
     });
   });
 });

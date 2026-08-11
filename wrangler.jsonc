@@ -6,8 +6,8 @@
   "compatibility_flags": ["nodejs_compat"],
   "routes": [
     {
-      "pattern": "moonvideo.ccwu.cc/*",
-      "zone_name": "moonvideo.ccwu.cc"
+      "pattern": "moonvideo.ccwu.cc",
+      "custom_domain": true
     }
   ],
   "vars": {

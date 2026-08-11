@@ -820,99 +820,111 @@ const VideoSourceConfig = ({
     } as React.CSSProperties;
 
     return (
-      <tr
+      <div
         ref={setNodeRef}
         style={style}
-        className='hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors select-none'
+        className='rounded-xl border border-gray-200 bg-white p-3 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900/40 dark:hover:bg-gray-800 sm:p-4'
       >
-        <td
-          className='px-2 py-4 cursor-grab text-gray-400'
-          style={{ touchAction: 'none' }}
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical size={16} />
-        </td>
-        <td className='px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100'>
-          {source.name}
-        </td>
-        <td className='px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100'>
-          {source.key}
-        </td>
-        <td
-          className='px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 max-w-[12rem] truncate'
-          title={source.api}
-        >
-          {source.api}
-        </td>
-        <td
-          className='px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100 max-w-[8rem] truncate'
-          title={source.detail || '-'}
-        >
-          {source.detail || '-'}
-        </td>
-        <td className='px-6 py-4 whitespace-nowrap max-w-[1rem]'>
-          <span
-            className={`px-2 py-1 text-xs rounded-full ${
-              !source.disabled
-                ? 'bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-300'
-                : 'bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-300'
-            }`}
-          >
-            {!source.disabled ? '启用中' : '已禁用'}
-          </span>
-          {source.auditNote && (
-            <p
-              className={`mt-2 max-w-[16rem] whitespace-normal text-xs leading-relaxed ${
-                source.auditStatus === 'blocked' ||
-                source.auditStatus === 'pending'
-                  ? 'text-red-600 dark:text-red-400'
-                  : source.auditStatus === 'filterable'
-                  ? 'text-amber-600 dark:text-amber-400'
-                  : 'text-gray-500 dark:text-gray-400'
-              }`}
-              title={`审计日期：${source.auditDate || '未知'}`}
-            >
-              {source.auditNote}
-            </p>
-          )}
-        </td>
-        <td className='px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2'>
+        <div className='flex items-start gap-2.5 sm:gap-3'>
           <button
-            onClick={() => handleAudit(source.key)}
-            className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-200 transition-colors'
+            type='button'
+            aria-label={`拖动排序：${source.name}`}
+            className='mt-0.5 flex-shrink-0 cursor-grab rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+            style={{ touchAction: 'none' }}
+            {...attributes}
+            {...listeners}
           >
-            服务器抽检
+            <GripVertical size={16} />
           </button>
-          {!source.disabled ? (
-            <button
-              onClick={() => handleToggleEnable(source.key)}
-              className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/60 transition-colors'
-            >
-              禁用
-            </button>
-          ) : role === 'owner' ? (
-            <button
-              onClick={() => handleOwnerEnable(source)}
-              className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/60 transition-colors'
-            >
-              站长审核并启用
-            </button>
-          ) : (
-            <span className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'>
-              待站长决定
-            </span>
-          )}
-          {(source.from !== 'config' || role === 'owner') && (
-            <button
-              onClick={() => handleDelete(source)}
-              className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700/40 dark:hover:bg-gray-700/60 dark:text-gray-200 transition-colors'
-            >
-              删除
-            </button>
-          )}
-        </td>
-      </tr>
+          <div className='min-w-0 flex-1'>
+            <div className='flex flex-wrap items-center gap-2'>
+              <strong className='min-w-0 break-words text-sm text-gray-900 dark:text-gray-100'>
+                {source.name}
+              </strong>
+              <code className='rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-300'>
+                {source.key}
+              </code>
+              <span
+                className={`rounded-full px-2 py-1 text-[11px] ${
+                  !source.disabled
+                    ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300'
+                    : 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300'
+                }`}
+              >
+                {!source.disabled ? '启用中' : '已禁用'}
+              </span>
+            </div>
+
+            <dl className='mt-3 grid min-w-0 gap-2 text-xs sm:grid-cols-2'>
+              <div className='min-w-0'>
+                <dt className='text-gray-500 dark:text-gray-400'>API 地址</dt>
+                <dd className='mt-0.5 break-all text-gray-800 dark:text-gray-200'>
+                  {source.api}
+                </dd>
+              </div>
+              <div className='min-w-0'>
+                <dt className='text-gray-500 dark:text-gray-400'>详情地址</dt>
+                <dd className='mt-0.5 break-all text-gray-800 dark:text-gray-200'>
+                  {source.detail || '-'}
+                </dd>
+              </div>
+            </dl>
+
+            {source.auditNote && (
+              <p
+                className={`mt-3 break-words text-xs leading-relaxed ${
+                  source.auditStatus === 'blocked'
+                    ? 'text-red-600 dark:text-red-400'
+                    : source.auditStatus === 'pending'
+                    ? 'text-blue-600 dark:text-blue-300'
+                    : source.auditStatus === 'filterable'
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-gray-500 dark:text-gray-400'
+                }`}
+                title={`审计日期：${source.auditDate || '未知'}`}
+              >
+                {source.auditNote}
+              </p>
+            )}
+
+            <div className='mt-3 flex flex-wrap gap-2 text-sm font-medium'>
+              <button
+                onClick={() => handleAudit(source.key)}
+                className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-200 transition-colors'
+              >
+                服务器抽检
+              </button>
+              {!source.disabled ? (
+                <button
+                  onClick={() => handleToggleEnable(source.key)}
+                  className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300 hover:bg-red-200 dark:hover:bg-red-900/60 transition-colors'
+                >
+                  禁用
+                </button>
+              ) : role === 'owner' ? (
+                <button
+                  onClick={() => handleOwnerEnable(source)}
+                  className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/60 transition-colors'
+                >
+                  站长审核并启用
+                </button>
+              ) : (
+                <span className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'>
+                  待站长决定
+                </span>
+              )}
+              {(source.from !== 'config' || role === 'owner') && (
+                <button
+                  onClick={() => handleDelete(source)}
+                  className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700/40 dark:hover:bg-gray-700/60 dark:text-gray-200 transition-colors'
+                >
+                  删除
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     );
   };
 
@@ -995,52 +1007,25 @@ const VideoSourceConfig = ({
         管理员和站长都可以新增视频源并运行服务器抽检。抽检结果仅是安全建议，不会自动改变视频源状态；只有站长可以作出最终启用决定，管理员可以随时紧急禁用。
       </div>
 
-      {/* 视频源表格 */}
-      <div className='border border-gray-200 dark:border-gray-700 rounded-lg max-h-[28rem] overflow-y-auto overflow-x-auto'>
-        <table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>
-          <thead className='bg-gray-50 dark:bg-gray-900'>
-            <tr>
-              <th className='w-8' />
-              <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-                名称
-              </th>
-              <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-                Key
-              </th>
-              <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-                API 地址
-              </th>
-              <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-                Detail 地址
-              </th>
-              <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-                状态
-              </th>
-              <th className='px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
-                操作
-              </th>
-            </tr>
-          </thead>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-            autoScroll={false}
-            modifiers={[restrictToVerticalAxis, restrictToParentElement]}
-          >
-            <SortableContext
-              items={sources.map((s) => s.key)}
-              strategy={verticalListSortingStrategy}
-            >
-              <tbody className='divide-y divide-gray-200 dark:divide-gray-700'>
-                {sources.map((source) => (
-                  <DraggableRow key={source.key} source={source} />
-                ))}
-              </tbody>
-            </SortableContext>
-          </DndContext>
-        </table>
-      </div>
+      {/* 响应式视频源卡片列表，避免移动端表格被压成逐字换行。 */}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+        autoScroll={false}
+        modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+      >
+        <SortableContext
+          items={sources.map((s) => s.key)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className='max-h-[38rem] space-y-3 overflow-y-auto pr-0.5 sm:max-h-[42rem]'>
+            {sources.map((source) => (
+              <DraggableRow key={source.key} source={source} />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
 
       {/* 保存排序按钮 */}
       {orderChanged && (
