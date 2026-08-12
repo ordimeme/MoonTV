@@ -70,7 +70,11 @@ export async function GET(request: Request) {
         {
           headers: {
             'Content-Type': 'application/vnd.apple.mpegurl; charset=utf-8',
-            'Cache-Control': 'private, no-store',
+            // The URL is HMAC-signed and contains no account data. A short
+            // shared cache prevents every retry/seek from rebuilding the same
+            // manifest in the Worker.
+            'Cache-Control': 'private, max-age=30',
+            'CDN-Cache-Control': 'public, max-age=120',
             'X-Content-Type-Options': 'nosniff',
           },
         }
@@ -83,11 +87,20 @@ export async function GET(request: Request) {
     if (!upstream.body) {
       return jsonError('视频源响应为空', 502);
     }
+    const isRangeRequest = Boolean(request.headers.get('range'));
     const headers = new Headers({
       'Content-Type': contentType || 'application/octet-stream',
-      'Cache-Control': 'private, max-age=300',
+      'Cache-Control': isRangeRequest
+        ? 'private, max-age=60'
+        : 'private, max-age=300',
       'X-Content-Type-Options': 'nosniff',
     });
+    if (!isRangeRequest) {
+      // Signed, immutable HLS fragments may be reused at the edge. Range
+      // responses remain private because partial-response cache semantics vary
+      // between upstream providers.
+      headers.set('CDN-Cache-Control', 'public, max-age=3600');
+    }
     for (const name of [
       'accept-ranges',
       'content-range',

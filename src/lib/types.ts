@@ -89,6 +89,8 @@ export interface SearchResult {
   title: string;
   poster: string;
   episodes: string[];
+  /** Same episodes through the authenticated Worker relay, used only if direct playback fails. */
+  relay_episodes?: string[];
   source: string;
   source_name: string;
   class?: string;

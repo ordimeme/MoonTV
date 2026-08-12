@@ -27,14 +27,20 @@ export async function GET(request: Request) {
     }
 
     const result = await getDetailFromApi(apiSite, id);
+    if (!result.episodes.length) {
+      return NextResponse.json(
+        { error: '该播放源没有可用播放地址' },
+        { status: 502 }
+      );
+    }
     const secret = getSessionSecret();
     if (!secret) throw new Error('服务器未配置会话密钥');
-    result.episodes = await relayMediaUrls(result.episodes, secret);
+    result.relay_episodes = await relayMediaUrls(result.episodes, secret);
     await getCacheTime();
 
     return NextResponse.json(result, {
       headers: {
-        'Cache-Control': 'private, no-store',
+        'Cache-Control': 'private, max-age=120, stale-while-revalidate=300',
         'CDN-Cache-Control': 'no-store',
         Vary: 'Cookie',
       },

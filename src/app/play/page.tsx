@@ -159,6 +159,7 @@ function PlayPageClient() {
 
   // 换源相关状态
   const [availableSources, setAvailableSources] = useState<SearchResult[]>([]);
+  const availableSourcesRef = useRef<SearchResult[]>([]);
   const [sourceSearchLoading, setSourceSearchLoading] = useState(false);
   const [sourceSearchError, setSourceSearchError] = useState<string | null>(
     null
@@ -175,6 +176,9 @@ function PlayPageClient() {
   >('initing');
   const sourceChangeInFlightRef = useRef(false);
   const sourceChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const firstFrameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const relayFallbackAttemptedRef = useRef<string>('');
+  const automaticSourceAttemptsRef = useRef<Set<string>>(new Set());
   const pendingSourceKeyRef = useRef('');
 
   // 播放进度保存相关
@@ -211,6 +215,13 @@ function PlayPageClient() {
       setVideoUrl(newUrl);
     }
   };
+
+  const getRelayFallbackUrl = () =>
+    detailRef.current?.relay_episodes?.[currentEpisodeIndexRef.current] || '';
+
+  useEffect(() => {
+    availableSourcesRef.current = availableSources;
+  }, [availableSources]);
 
   // 跳过片头片尾配置相关函数
   const handleSkipConfigChange = async (newConfig: {
@@ -578,20 +589,20 @@ function PlayPageClient() {
     newSource: string,
     newId: string,
     newTitle: string
-  ) => {
+  ): Promise<boolean> => {
     if (
       sourceChangeInFlightRef.current ||
       (newSource === currentSourceRef.current && newId === currentIdRef.current)
     ) {
-      return;
+      return false;
     }
 
-    const sourceCandidate = availableSources.find(
+    const sourceCandidate = availableSourcesRef.current.find(
       (source) => source.source === newSource && source.id === newId
     );
     if (!sourceCandidate) {
       setSourceSearchError('未找到该播放源，请刷新源列表后重试');
-      return;
+      return false;
     }
 
     try {
@@ -678,6 +689,12 @@ function PlayPageClient() {
       setDetail(newDetail);
       setCurrentEpisodeIndex(targetIndex);
       setSourceSearchError(null);
+      setError(null);
+      // The network request has finished. Do not keep this lock until canplay:
+      // a newly selected source can fail before canplay, and that failure must
+      // be allowed to enter the relay/next-source recovery state machine.
+      sourceChangeInFlightRef.current = false;
+      return true;
     } catch (err) {
       // 隐藏换源加载状态
       sourceChangeInFlightRef.current = false;
@@ -687,7 +704,77 @@ function PlayPageClient() {
       }
       setIsVideoLoading(false);
       setSourceSearchError(err instanceof Error ? err.message : '换源失败');
+      return false;
     }
+  };
+
+  const handlePlaybackFailure = async (reason: string) => {
+    if (sourceChangeInFlightRef.current) return;
+    if (firstFrameTimeoutRef.current) {
+      clearTimeout(firstFrameTimeoutRef.current);
+      firstFrameTimeoutRef.current = null;
+    }
+
+    const episodeIndex = currentEpisodeIndexRef.current;
+    const currentKey = `${generateStorageKey(
+      currentSourceRef.current,
+      currentIdRef.current
+    )}:${episodeIndex}`;
+    const relayUrl = getRelayFallbackUrl();
+
+    // Fast path: retain the selected source and retry it through Cloudflare only
+    // after direct browser playback failed. This keeps the original fast path
+    // while preserving a CORS/network fallback.
+    if (
+      relayUrl &&
+      videoUrl !== relayUrl &&
+      relayFallbackAttemptedRef.current !== currentKey
+    ) {
+      relayFallbackAttemptedRef.current = currentKey;
+      setVideoLoadingStage('initing');
+      setIsVideoLoading(true);
+      setSourceSearchError(`${reason}，正在通过安全中转重试`);
+      setVideoUrl(relayUrl);
+      return;
+    }
+
+    automaticSourceAttemptsRef.current.add(
+      generateStorageKey(currentSourceRef.current, currentIdRef.current)
+    );
+    const candidates = availableSourcesRef.current.filter((candidate) => {
+      const key = generateStorageKey(candidate.source, candidate.id);
+      return !automaticSourceAttemptsRef.current.has(key);
+    });
+
+    for (const candidate of candidates.slice(0, 5)) {
+      automaticSourceAttemptsRef.current.add(
+        generateStorageKey(candidate.source, candidate.id)
+      );
+      const changed = await handleSourceChange(
+        candidate.source,
+        candidate.id,
+        candidate.title
+      );
+      if (changed) {
+        setSourceSearchError(`${reason}，已自动切换到${candidate.source_name}`);
+        return;
+      }
+    }
+
+    setIsVideoLoading(false);
+    setSourceSearchError(`${reason}，暂无其他可用播放源，请稍后重试`);
+  };
+
+  const armFirstFrameTimeout = () => {
+    if (firstFrameTimeoutRef.current) {
+      clearTimeout(firstFrameTimeoutRef.current);
+    }
+    firstFrameTimeoutRef.current = setTimeout(() => {
+      const video = artPlayerRef.current?.video as HTMLVideoElement | undefined;
+      if (!video || (video.currentTime <= 0 && video.readyState < 3)) {
+        void handlePlaybackFailure('首帧加载超时');
+      }
+    }, 15_000);
   };
 
   useEffect(() => {
@@ -921,6 +1008,9 @@ function PlayPageClient() {
       if (sourceChangeTimeoutRef.current) {
         clearTimeout(sourceChangeTimeoutRef.current);
       }
+      if (firstFrameTimeoutRef.current) {
+        clearTimeout(firstFrameTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -1028,6 +1118,7 @@ function PlayPageClient() {
         currentEpisodeIndex + 1
       }集`;
       artPlayerRef.current.poster = videoCover;
+      armFirstFrameTimeout();
       return;
     }
 
@@ -1120,7 +1211,15 @@ function PlayPageClient() {
             let mediaRecoveryAttempts = 0;
             hls.on(Hls.Events.ERROR, function (event: any, data: any) {
               if (!data.fatal) return;
-              console.error('HLS fatal error:', event, data);
+              // A fatal HLS.js event is recoverable here: the player retries
+              // through the signed relay and then another source. Keep it as a
+              // warning so recovered playback does not appear as a page crash
+              // in browser error monitoring.
+              console.warn(
+                'HLS source failed; starting recovery:',
+                event,
+                data
+              );
               if (
                 data.type === Hls.ErrorTypes.MEDIA_ERROR &&
                 mediaRecoveryAttempts < 1
@@ -1129,14 +1228,10 @@ function PlayPageClient() {
                 hls.recoverMediaError();
                 return;
               }
-              sourceChangeInFlightRef.current = false;
-              if (sourceChangeTimeoutRef.current) {
-                clearTimeout(sourceChangeTimeoutRef.current);
-                sourceChangeTimeoutRef.current = null;
-              }
-              setIsVideoLoading(false);
-              setSourceSearchError('当前视频源加载失败，请切换其他源');
               hls.destroy();
+              video.hls = undefined;
+              sourceChangeInFlightRef.current = false;
+              void handlePlaybackFailure('当前视频源加载失败');
             });
           },
         },
@@ -1259,6 +1354,8 @@ function PlayPageClient() {
         setError(null);
       });
 
+      armFirstFrameTimeout();
+
       artPlayerRef.current.on('video:volumechange', () => {
         lastVolumeRef.current = artPlayerRef.current.volume;
       });
@@ -1268,6 +1365,14 @@ function PlayPageClient() {
 
       // 监听视频可播放事件，这时恢复播放进度更可靠
       artPlayerRef.current.on('video:canplay', () => {
+        if (firstFrameTimeoutRef.current) {
+          clearTimeout(firstFrameTimeoutRef.current);
+          firstFrameTimeoutRef.current = null;
+        }
+        automaticSourceAttemptsRef.current.clear();
+        if (videoUrl !== getRelayFallbackUrl()) {
+          relayFallbackAttemptedRef.current = '';
+        }
         sourceChangeInFlightRef.current = false;
         if (sourceChangeTimeoutRef.current) {
           clearTimeout(sourceChangeTimeoutRef.current);
@@ -1308,6 +1413,7 @@ function PlayPageClient() {
 
         // 隐藏换源加载状态
         setIsVideoLoading(false);
+        setSourceSearchError(null);
       });
 
       // 监听视频时间更新事件，实现跳过片头片尾
@@ -1365,6 +1471,7 @@ function PlayPageClient() {
         if (artPlayerRef.current.currentTime > 0) {
           return;
         }
+        void handlePlaybackFailure('播放器加载失败');
       });
 
       // 监听视频播放结束事件，自动播放下一集

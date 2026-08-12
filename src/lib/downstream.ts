@@ -296,7 +296,13 @@ export async function getDetailFromApi(
     throw new Error('无效的视频详情地址');
   }
   if (apiSite.detail) {
-    return handleSpecialSourceDetail(id, apiSite);
+    try {
+      const specialDetail = await handleSpecialSourceDetail(id, apiSite);
+      if (specialDetail.episodes.length > 0) return specialDetail;
+    } catch {
+      // Many detail pages intermittently enable WAF/CAPTCHA. Their JSON catalog
+      // endpoint is the reliable fallback and usually contains the same HLS URL.
+    }
   }
 
   const detailUrl = `${apiSite.api}${API_CONFIG.detail.path}${id}`;
