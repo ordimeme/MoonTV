@@ -1,6 +1,6 @@
 import { filterInterstitialAdsFromM3U8 } from '@/lib/m3u8-ad-filter';
+import { fetchMedia } from '@/lib/media-fetch';
 import {
-  isSafeMediaUrl,
   limitResponseStream,
   MAX_MANIFEST_BYTES,
   MAX_MEDIA_BYTES,
@@ -12,8 +12,6 @@ import { getSessionSecret } from '@/lib/session';
 
 export const dynamic = 'force-dynamic';
 
-const MAX_REDIRECTS = 3;
-
 function jsonError(error: string, status: number): Response {
   return new Response(JSON.stringify({ error }), {
     status,
@@ -22,37 +20,6 @@ function jsonError(error: string, status: number): Response {
       'Cache-Control': 'private, no-store',
     },
   });
-}
-
-async function fetchMedia(
-  url: string,
-  range: string | null
-): Promise<Response> {
-  let current = url;
-  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
-    let response: Response;
-    try {
-      response = await fetch(current, {
-        redirect: 'manual',
-        signal: controller.signal,
-        headers: {
-          Accept: 'application/vnd.apple.mpegurl,application/x-mpegURL,video/*',
-          ...(range ? { Range: range } : {}),
-        },
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
-    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
-    const location = response.headers.get('location');
-    if (!location) throw new Error('视频源返回了无效跳转');
-    const next = new URL(location, current).toString();
-    if (!isSafeMediaUrl(next)) throw new Error('视频源跳转到不安全地址');
-    current = next;
-  }
-  throw new Error('视频源跳转次数过多');
 }
 
 export async function GET(request: Request) {
@@ -73,14 +40,18 @@ export async function GET(request: Request) {
   if (!url) return jsonError('无效的视频访问地址', 403);
 
   try {
-    const upstream = await fetchMedia(url, request.headers.get('range'));
+    const { response: upstream, finalUrl } = await fetchMedia(
+      url,
+      request.headers.get('range')
+    );
     if (!upstream.ok && upstream.status !== 206) {
       return jsonError('视频源请求失败', 502);
     }
     const contentType = upstream.headers.get('content-type') || '';
     const contentLength = Number(upstream.headers.get('content-length'));
     const isManifest =
-      /mpegurl/i.test(contentType) || new URL(url).pathname.endsWith('.m3u8');
+      /mpegurl/i.test(contentType) ||
+      new URL(finalUrl).pathname.endsWith('.m3u8');
 
     if (isManifest) {
       if (
@@ -95,7 +66,7 @@ export async function GET(request: Request) {
       }
       const filteredManifest = filterInterstitialAdsFromM3U8(manifest);
       return new Response(
-        await rewriteHlsManifest(filteredManifest, url, secret),
+        await rewriteHlsManifest(filteredManifest, finalUrl, secret),
         {
           headers: {
             'Content-Type': 'application/vnd.apple.mpegurl; charset=utf-8',

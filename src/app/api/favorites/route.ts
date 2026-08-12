@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { parseMediaIdentity } from '@/lib/media-identity';
 import { readLimitedJson } from '@/lib/request-security';
 import { PRIVATE_DATA_HEADERS } from '@/lib/response-security';
 import { Favorite } from '@/lib/types';
@@ -25,17 +26,25 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const key = searchParams.get('key');
+    const identity = parseMediaIdentity({
+      source: searchParams.get('source'),
+      id: searchParams.get('id'),
+      key,
+    });
 
     // 查询单条收藏
-    if (key) {
-      const [source, id] = key.split('+');
-      if (!source || !id) {
+    if (key || searchParams.has('source') || searchParams.has('id')) {
+      if (!identity) {
         return NextResponse.json(
           { error: 'Invalid key format' },
           { status: 400 }
         );
       }
-      const fav = await db.getFavorite(authInfo.username, source, id);
+      const fav = await db.getFavorite(
+        authInfo.username,
+        identity.source,
+        identity.id
+      );
       return NextResponse.json(fav, {
         status: 200,
         headers: PRIVATE_DATA_HEADERS,
@@ -71,11 +80,14 @@ export async function POST(request: NextRequest) {
 
     const body = await readLimitedJson<{
       key?: string;
+      source?: string;
+      id?: string;
       favorite?: Favorite;
     }>(request, 32 * 1024);
-    const { key, favorite } = body;
+    const { favorite } = body;
+    const identity = parseMediaIdentity(body);
 
-    if (!key || !favorite) {
+    if (!identity || !favorite) {
       return NextResponse.json(
         { error: 'Missing key or favorite' },
         { status: 400 }
@@ -90,20 +102,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const [source, id] = key.split('+');
-    if (!source || !id) {
-      return NextResponse.json(
-        { error: 'Invalid key format' },
-        { status: 400 }
-      );
-    }
-
     const finalFavorite = {
       ...favorite,
       save_time: favorite.save_time ?? Date.now(),
     } as Favorite;
 
-    await db.saveFavorite(authInfo.username, source, id, finalFavorite);
+    await db.saveFavorite(
+      authInfo.username,
+      identity.source,
+      identity.id,
+      finalFavorite
+    );
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (err) {
@@ -132,17 +141,23 @@ export async function DELETE(request: NextRequest) {
     const username = authInfo.username;
     const { searchParams } = new URL(request.url);
     const key = searchParams.get('key');
+    const hasIdentity =
+      Boolean(key) || searchParams.has('source') || searchParams.has('id');
+    const identity = parseMediaIdentity({
+      source: searchParams.get('source'),
+      id: searchParams.get('id'),
+      key,
+    });
 
-    if (key) {
+    if (hasIdentity) {
       // 删除单条
-      const [source, id] = key.split('+');
-      if (!source || !id) {
+      if (!identity) {
         return NextResponse.json(
           { error: 'Invalid key format' },
           { status: 400 }
         );
       }
-      await db.deleteFavorite(username, source, id);
+      await db.deleteFavorite(username, identity.source, identity.id);
     } else {
       await db.deleteAllFavorites(username);
     }

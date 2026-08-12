@@ -14,6 +14,7 @@
  * 如后续需要在客户端读取收藏等其它数据，可按同样方式在此文件中补充实现。
  */
 
+import { buildMediaIdentityQuery } from './media-identity';
 import { getCachedSession } from './session.client';
 import { SkipConfig } from './types';
 
@@ -535,7 +536,7 @@ export async function savePlayRecord(
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ key, record }),
+        body: JSON.stringify({ source, id, record }),
       });
     } catch (err) {
       await handleDatabaseOperationFailure('playRecords', err);
@@ -593,9 +594,12 @@ export async function deletePlayRecord(
 
     // 异步同步到数据库
     try {
-      await fetchWithAuth(`/api/playrecords?key=${encodeURIComponent(key)}`, {
-        method: 'DELETE',
-      });
+      await fetchWithAuth(
+        `/api/playrecords?${buildMediaIdentityQuery(source, id)}`,
+        {
+          method: 'DELETE',
+        }
+      );
     } catch (err) {
       await handleDatabaseOperationFailure('playRecords', err);
       triggerGlobalError('删除播放记录失败');
@@ -945,7 +949,7 @@ export async function saveFavorite(
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ key, favorite }),
+        body: JSON.stringify({ source, id, favorite }),
       });
     } catch (err) {
       await handleDatabaseOperationFailure('favorites', err);
@@ -1003,9 +1007,12 @@ export async function deleteFavorite(
 
     // 异步同步到数据库
     try {
-      await fetchWithAuth(`/api/favorites?key=${encodeURIComponent(key)}`, {
-        method: 'DELETE',
-      });
+      await fetchWithAuth(
+        `/api/favorites?${buildMediaIdentityQuery(source, id)}`,
+        {
+          method: 'DELETE',
+        }
+      );
     } catch (err) {
       await handleDatabaseOperationFailure('favorites', err);
       triggerGlobalError('删除收藏失败');
@@ -1441,7 +1448,7 @@ export async function saveSkipConfig(
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ key, config }),
+        body: JSON.stringify({ source, id, config }),
       });
     } catch (err) {
       console.error('保存跳过片头片尾配置失败:', err);
@@ -1563,9 +1570,12 @@ export async function deleteSkipConfig(
 
     // 异步同步到数据库
     try {
-      await fetchWithAuth(`/api/skipconfigs?key=${encodeURIComponent(key)}`, {
-        method: 'DELETE',
-      });
+      await fetchWithAuth(
+        `/api/skipconfigs?${buildMediaIdentityQuery(source, id)}`,
+        {
+          method: 'DELETE',
+        }
+      );
     } catch (err) {
       console.error('删除跳过片头片尾配置失败:', err);
       triggerGlobalError('删除跳过片头片尾配置失败');

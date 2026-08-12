@@ -212,26 +212,6 @@ function PlayPageClient() {
     }
   };
 
-  const ensureVideoSource = (video: HTMLVideoElement | null, url: string) => {
-    if (!video || !url) return;
-    const sources = Array.from(video.getElementsByTagName('source'));
-    const existed = sources.some((s) => s.src === url);
-    if (!existed) {
-      // 移除旧的 source，保持唯一
-      sources.forEach((s) => s.remove());
-      const sourceEl = document.createElement('source');
-      sourceEl.src = url;
-      video.appendChild(sourceEl);
-    }
-
-    // 始终允许远程播放（AirPlay / Cast）
-    video.disableRemotePlayback = false;
-    // 如果曾经有禁用属性，移除之
-    if (video.hasAttribute('disableRemotePlayback')) {
-      video.removeAttribute('disableRemotePlayback');
-    }
-  };
-
   // 跳过片头片尾配置相关函数
   const handleSkipConfigChange = async (newConfig: {
     enable: boolean;
@@ -1048,12 +1028,6 @@ function PlayPageClient() {
         currentEpisodeIndex + 1
       }集`;
       artPlayerRef.current.poster = videoCover;
-      if (artPlayerRef.current?.video) {
-        ensureVideoSource(
-          artPlayerRef.current.video as HTMLVideoElement,
-          videoUrl
-        );
-      }
       return;
     }
 
@@ -1120,7 +1094,13 @@ function PlayPageClient() {
             const hls = new Hls({
               debug: false, // 关闭日志
               enableWorker: true, // WebWorker 解码，降低主线程压力
-              lowLatencyMode: true, // 开启低延迟 LL-HLS
+              lowLatencyMode: false, // 普通点播不追赶直播边缘，减少误判和重载
+              manifestLoadingTimeOut: 10_000,
+              manifestLoadingMaxRetry: 1,
+              levelLoadingTimeOut: 10_000,
+              levelLoadingMaxRetry: 1,
+              fragLoadingTimeOut: 15_000,
+              fragLoadingMaxRetry: 2,
 
               /* 缓冲/内存相关 */
               maxBufferLength: 30, // 前向缓冲最大 30s，过大容易导致高延迟
@@ -1137,26 +1117,26 @@ function PlayPageClient() {
             hls.attachMedia(video);
             video.hls = hls;
 
-            ensureVideoSource(video, url);
-
+            let mediaRecoveryAttempts = 0;
             hls.on(Hls.Events.ERROR, function (event: any, data: any) {
-              console.error('HLS Error:', event, data);
-              if (data.fatal) {
-                switch (data.type) {
-                  case Hls.ErrorTypes.NETWORK_ERROR:
-                    console.log('网络错误，尝试恢复...');
-                    hls.startLoad();
-                    break;
-                  case Hls.ErrorTypes.MEDIA_ERROR:
-                    console.log('媒体错误，尝试恢复...');
-                    hls.recoverMediaError();
-                    break;
-                  default:
-                    console.log('无法恢复的错误');
-                    hls.destroy();
-                    break;
-                }
+              if (!data.fatal) return;
+              console.error('HLS fatal error:', event, data);
+              if (
+                data.type === Hls.ErrorTypes.MEDIA_ERROR &&
+                mediaRecoveryAttempts < 1
+              ) {
+                mediaRecoveryAttempts += 1;
+                hls.recoverMediaError();
+                return;
               }
+              sourceChangeInFlightRef.current = false;
+              if (sourceChangeTimeoutRef.current) {
+                clearTimeout(sourceChangeTimeoutRef.current);
+                sourceChangeTimeoutRef.current = null;
+              }
+              setIsVideoLoading(false);
+              setSourceSearchError('当前视频源加载失败，请切换其他源');
+              hls.destroy();
             });
           },
         },
@@ -1418,10 +1398,9 @@ function PlayPageClient() {
       });
 
       if (artPlayerRef.current?.video) {
-        ensureVideoSource(
-          artPlayerRef.current.video as HTMLVideoElement,
-          videoUrl
-        );
+        const video = artPlayerRef.current.video as HTMLVideoElement;
+        video.disableRemotePlayback = false;
+        video.removeAttribute('disableRemotePlayback');
       }
     } catch (err) {
       console.error('创建播放器失败:', err);

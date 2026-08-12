@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { parseMediaIdentity } from '@/lib/media-identity';
 import { readLimitedJson } from '@/lib/request-security';
 import { PRIVATE_DATA_HEADERS } from '@/lib/response-security';
 import { SkipConfig } from '@/lib/types';
@@ -45,16 +46,11 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await readLimitedJson<Record<string, any>>(request);
-    const { key, config } = body;
+    const { config } = body;
+    const identity = parseMediaIdentity(body);
 
-    if (!key || !config) {
+    if (!identity || !config) {
       return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
-    }
-
-    // 解析key为source和id
-    const [source, id] = key.split('+');
-    if (!source || !id) {
-      return NextResponse.json({ error: '无效的key格式' }, { status: 400 });
     }
 
     // 验证配置格式
@@ -64,7 +60,12 @@ export async function POST(request: NextRequest) {
       outro_time: Number(config.outro_time) || 0,
     };
 
-    await db.setSkipConfig(authInfo.username, source, id, skipConfig);
+    await db.setSkipConfig(
+      authInfo.username,
+      identity.source,
+      identity.id,
+      skipConfig
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -84,19 +85,17 @@ export async function DELETE(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const key = searchParams.get('key');
+    const identity = parseMediaIdentity({
+      source: searchParams.get('source'),
+      id: searchParams.get('id'),
+      key: searchParams.get('key'),
+    });
 
-    if (!key) {
+    if (!identity) {
       return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
     }
 
-    // 解析key为source和id
-    const [source, id] = key.split('+');
-    if (!source || !id) {
-      return NextResponse.json({ error: '无效的key格式' }, { status: 400 });
-    }
-
-    await db.deleteSkipConfig(authInfo.username, source, id);
+    await db.deleteSkipConfig(authInfo.username, identity.source, identity.id);
 
     return NextResponse.json({ success: true });
   } catch (error) {

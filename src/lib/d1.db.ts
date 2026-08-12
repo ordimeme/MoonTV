@@ -48,13 +48,10 @@ async function getD1Database(): Promise<D1Database> {
 }
 
 export class D1Storage implements IStorage {
-  private db: D1Database | null = null;
-
   private async getDatabase(): Promise<D1Database> {
-    if (!this.db) {
-      this.db = await getD1Database();
-    }
-    return this.db;
+    // OpenNext exposes Cloudflare bindings through the active request context.
+    // Never retain that context across requests in the module-level DbManager.
+    return getD1Database();
   }
 
   // 播放记录相关

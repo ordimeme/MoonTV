@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { parseMediaIdentity } from '@/lib/media-identity';
 import { readLimitedJson } from '@/lib/request-security';
 import { PRIVATE_DATA_HEADERS } from '@/lib/response-security';
 import { PlayRecord } from '@/lib/types';
@@ -40,11 +41,14 @@ export async function POST(request: NextRequest) {
 
     const body = await readLimitedJson<{
       key?: string;
+      source?: string;
+      id?: string;
       record?: PlayRecord;
     }>(request, 32 * 1024);
-    const { key, record } = body;
+    const { record } = body;
+    const identity = parseMediaIdentity(body);
 
-    if (!key || !record) {
+    if (!identity || !record) {
       return NextResponse.json(
         { error: 'Missing key or record' },
         { status: 400 }
@@ -59,21 +63,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 从key中解析source和id
-    const [source, id] = key.split('+');
-    if (!source || !id) {
-      return NextResponse.json(
-        { error: 'Invalid key format' },
-        { status: 400 }
-      );
-    }
-
     const finalRecord = {
       ...record,
       save_time: record.save_time ?? Date.now(),
     } as PlayRecord;
 
-    await db.savePlayRecord(authInfo.username, source, id, finalRecord);
+    await db.savePlayRecord(
+      authInfo.username,
+      identity.source,
+      identity.id,
+      finalRecord
+    );
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (err) {
@@ -96,18 +96,24 @@ export async function DELETE(request: NextRequest) {
     const username = authInfo.username;
     const { searchParams } = new URL(request.url);
     const key = searchParams.get('key');
+    const hasIdentity =
+      Boolean(key) || searchParams.has('source') || searchParams.has('id');
+    const identity = parseMediaIdentity({
+      source: searchParams.get('source'),
+      id: searchParams.get('id'),
+      key,
+    });
 
-    if (key) {
+    if (hasIdentity) {
       // 如果提供了 key，删除单条播放记录
-      const [source, id] = key.split('+');
-      if (!source || !id) {
+      if (!identity) {
         return NextResponse.json(
           { error: 'Invalid key format' },
           { status: 400 }
         );
       }
 
-      await db.deletePlayRecord(username, source, id);
+      await db.deletePlayRecord(username, identity.source, identity.id);
     } else {
       await db.deleteAllPlayRecords(username);
     }

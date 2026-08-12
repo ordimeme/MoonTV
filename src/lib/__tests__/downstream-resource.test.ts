@@ -1,6 +1,6 @@
 /** @jest-environment node */
 
-import { searchFromApi } from '../downstream';
+import { extractPlayableEpisodes, searchFromApi } from '../downstream';
 
 describe('downstream search resource budgets', () => {
   const site = {
@@ -77,5 +77,17 @@ describe('downstream search resource budgets', () => {
     });
     expect(results).toHaveLength(1);
     expect(results[0].desc).toBe('');
+  });
+
+  it('selects the best safe playback group instead of assuming the first group', () => {
+    const episodes = extractPlayableEpisodes(
+      '第1集$http://legacy.example.com/one.m3u8$$$' +
+        '第1集$https://cdn.example.com/one.m3u8#' +
+        '第2集$https://cdn.example.com/two.m3u8'
+    );
+    expect(episodes).toEqual([
+      'https://cdn.example.com/one.m3u8',
+      'https://cdn.example.com/two.m3u8',
+    ]);
   });
 });
