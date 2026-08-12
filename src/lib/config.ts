@@ -4,11 +4,6 @@ import { getStorage } from '@/lib/db';
 
 import { AdminConfig, AdminConfigConflictError } from './admin.types';
 import runtimeConfig from './runtime';
-import {
-  getSourceAuditPolicy,
-  isSourceAuditFresh,
-  SOURCE_AUDIT_DATE,
-} from './source-audit';
 import { isSourceEnabledForRuntime } from './source-management';
 
 export interface ApiSite {
@@ -53,26 +48,28 @@ export const API_CONFIG = {
 // 在模块加载时根据环境决定配置来源
 let fileConfig: ConfigFileStruct;
 let cachedConfig: AdminConfig;
+let cachedConfigExpiresAt = 0;
+const CONFIG_CACHE_TTL_MS = 5_000;
 
 type SourceConfigEntry = AdminConfig['SourceConfig'][number];
+
+function sanitizeSource(source: SourceConfigEntry): SourceConfigEntry {
+  return {
+    key: source.key,
+    name: source.name,
+    api: source.api,
+    detail: source.detail,
+    from: source.from,
+    disabled: source.disabled,
+    deleted: source.deleted,
+  };
+}
 
 function buildRuntimeSource(
   key: string,
   site: ApiSite,
   existing?: SourceConfigEntry
 ): SourceConfigEntry {
-  const policy = getSourceAuditPolicy(key);
-  const useExistingAudit = Boolean(
-    existing?.auditStatus && isSourceAuditFresh(existing.auditDate)
-  );
-  const auditDate = useExistingAudit
-    ? existing?.auditDate
-    : policy
-    ? SOURCE_AUDIT_DATE
-    : existing?.auditDate;
-  const auditIsFresh = isSourceAuditFresh(auditDate);
-  const auditStatus = useExistingAudit ? existing?.auditStatus : policy?.status;
-  const auditNote = useExistingAudit ? existing?.auditNote : policy?.note;
   return {
     ...existing,
     key,
@@ -80,14 +77,9 @@ function buildRuntimeSource(
     api: site.api,
     detail: site.detail,
     from: 'config',
-    // 抽检只提供建议，不能覆盖站长已经作出的启用/禁用决定。
-    disabled: existing?.disabled ?? policy?.defaultDisabled ?? true,
+    // 恢复原有行为：内置源默认启用，之后只服从站长的显式操作。
+    disabled: existing?.disabled ?? false,
     deleted: existing?.deleted || false,
-    auditStatus: auditIsFresh ? auditStatus : 'pending',
-    auditNote: auditIsFresh
-      ? auditNote
-      : '审核已过期或尚未审核，需重新验证后才能启用',
-    auditDate,
   };
 }
 
@@ -96,7 +88,10 @@ function mergeRuntimeSources(
   apiSiteEntries: [string, ApiSite][]
 ): SourceConfigEntry[] {
   const sourceConfigMap = new Map(
-    (existingSources || []).map((source) => [source.key, source])
+    (existingSources || []).map((source) => [
+      source.key,
+      sanitizeSource(source),
+    ])
   );
 
   apiSiteEntries.forEach(([key, site]) => {
@@ -333,9 +328,14 @@ async function initConfig() {
 }
 
 export async function getConfig(): Promise<AdminConfig> {
+  if (cachedConfig && Date.now() < cachedConfigExpiresAt) {
+    return cachedConfig;
+  }
+
   const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
   if (process.env.DOCKER_ENV === 'true' || storageType === 'localstorage') {
     await initConfig();
+    cachedConfigExpiresAt = Date.now() + CONFIG_CACHE_TTL_MS;
     return cachedConfig;
   }
   // 非 docker 环境且 DB 存储，直接读 db 配置
@@ -383,6 +383,7 @@ export async function getConfig(): Promise<AdminConfig> {
     // DB 无配置，执行一次初始化
     await initConfig();
   }
+  cachedConfigExpiresAt = Date.now() + CONFIG_CACHE_TTL_MS;
   return cachedConfig;
 }
 
@@ -468,6 +469,7 @@ export async function resetConfig() {
   cachedConfig.UserConfig = adminConfig.UserConfig;
   cachedConfig.SourceConfig = adminConfig.SourceConfig;
   cachedConfig.CustomCategories = adminConfig.CustomCategories;
+  cachedConfigExpiresAt = Date.now() + CONFIG_CACHE_TTL_MS;
 }
 
 export async function getCacheTime(): Promise<number> {

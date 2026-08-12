@@ -26,9 +26,6 @@ export interface AdminConfig {
     from: 'config' | 'custom';
     disabled?: boolean;
     deleted?: boolean;
-    auditStatus?: 'pending' | 'clean' | 'filterable' | 'blocked';
-    auditNote?: string;
-    auditDate?: string;
   }[];
   CustomCategories: {
     name?: string;

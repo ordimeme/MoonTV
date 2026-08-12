@@ -1,13 +1,10 @@
 /* eslint-disable no-console */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
-import { getConfig } from '@/lib/config';
-
-export async function GET(_request: NextRequest) {
-  const config = await getConfig();
+export async function GET() {
   const result = {
-    SiteName: config.SiteConfig.SiteName,
+    SiteName: process.env.SITE_NAME || 'MoonTV',
     StorageType: process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage',
   };
   return NextResponse.json(result);

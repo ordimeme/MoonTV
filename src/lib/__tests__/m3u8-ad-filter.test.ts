@@ -1,5 +1,4 @@
 import { filterInterstitialAdsFromM3U8 } from '../m3u8-ad-filter';
-import { getSourceAuditPolicy } from '../source-audit';
 import { deleteSourceFromConfig } from '../source-management';
 
 describe('M3U8 interstitial filtering', () => {
@@ -59,22 +58,6 @@ describe('M3U8 interstitial filtering', () => {
   });
 });
 
-describe('source audit policies', () => {
-  it('keeps sources that passed the latest playable-manifest review available', () => {
-    expect(getSourceAuditPolicy('ruyi')).toMatchObject({
-      status: 'clean',
-      defaultDisabled: false,
-    });
-  });
-
-  it('keeps inconclusive sources disabled until the owner decides', () => {
-    expect(getSourceAuditPolicy('heimuer')).toMatchObject({
-      status: 'pending',
-      defaultDisabled: true,
-    });
-  });
-});
-
 describe('source deletion', () => {
   it('allows the owner to tombstone a built-in source', () => {
     const sources = [
@@ -89,7 +72,7 @@ describe('source deletion', () => {
     expect(sources[0]).toMatchObject({ deleted: true, disabled: true });
   });
 
-  it('keeps built-in sources protected from non-owner admins', () => {
+  it('keeps all sources protected from non-owner admins', () => {
     const sources = [
       {
         key: 'built-in',
@@ -113,7 +96,7 @@ describe('source deletion', () => {
         from: 'custom' as const,
       },
     ];
-    expect(deleteSourceFromConfig(sources, 'custom', false)).toBe('deleted');
+    expect(deleteSourceFromConfig(sources, 'custom', true)).toBe('deleted');
     expect(sources).toHaveLength(0);
   });
 });

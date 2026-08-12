@@ -70,9 +70,6 @@ interface DataSource {
   detail?: string;
   disabled?: boolean;
   deleted?: boolean;
-  auditStatus?: 'pending' | 'clean' | 'filterable' | 'blocked';
-  auditNote?: string;
-  auditDate?: string;
   from: 'config' | 'custom';
 }
 
@@ -645,11 +642,9 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
 // 视频源配置组件
 const VideoSourceConfig = ({
   config,
-  role,
   refreshConfig,
 }: {
   config: AdminConfig | null;
-  role: 'owner' | 'admin' | null;
   refreshConfig: () => Promise<void>;
 }) => {
   const [sources, setSources] = useState<DataSource[]>([]);
@@ -719,25 +714,15 @@ const VideoSourceConfig = ({
     });
   };
 
-  const handleAudit = (key: string) => {
-    callSourceApi({ action: 'audit', key }).catch(() => {
-      console.error('审核视频源失败', key);
-    });
-  };
-
-  const handleOwnerEnable = async (source: DataSource) => {
-    const warning =
-      source.auditStatus === 'blocked' || source.auditStatus === 'pending';
+  const handleEnable = async (source: DataSource) => {
     const result = await Swal.fire({
-      icon: warning ? 'warning' : 'question',
+      icon: 'question',
       title: `确认启用“${source.name}”？`,
-      text: warning
-        ? '服务器抽检提示存在风险或尚未完成。站长拥有最终决定权，启用后相关风险由站长确认承担。'
-        : '服务器抽检只是辅助建议，是否启用由站长最终决定。',
+      text: '启用后该视频源会参与搜索和播放，请确认地址由您信任。',
       showCancelButton: true,
-      confirmButtonText: '站长确认启用',
+      confirmButtonText: '确认启用',
       cancelButtonText: '取消',
-      confirmButtonColor: warning ? '#dc2626' : '#16a34a',
+      confirmButtonColor: '#16a34a',
     });
     if (!result.isConfirmed) return;
     callSourceApi({ action: 'enable', key: source.key }).catch(() => {
@@ -870,30 +855,7 @@ const VideoSourceConfig = ({
               </div>
             </dl>
 
-            {source.auditNote && (
-              <p
-                className={`mt-3 break-words text-xs leading-relaxed ${
-                  source.auditStatus === 'blocked'
-                    ? 'text-red-600 dark:text-red-400'
-                    : source.auditStatus === 'pending'
-                    ? 'text-blue-600 dark:text-blue-300'
-                    : source.auditStatus === 'filterable'
-                    ? 'text-amber-600 dark:text-amber-400'
-                    : 'text-gray-500 dark:text-gray-400'
-                }`}
-                title={`审计日期：${source.auditDate || '未知'}`}
-              >
-                {source.auditNote}
-              </p>
-            )}
-
             <div className='mt-3 flex flex-wrap gap-2 text-sm font-medium'>
-              <button
-                onClick={() => handleAudit(source.key)}
-                className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-200 transition-colors'
-              >
-                服务器抽检
-              </button>
               {!source.disabled ? (
                 <button
                   onClick={() => handleToggleEnable(source.key)}
@@ -901,26 +863,20 @@ const VideoSourceConfig = ({
                 >
                   禁用
                 </button>
-              ) : role === 'owner' ? (
+              ) : (
                 <button
-                  onClick={() => handleOwnerEnable(source)}
+                  onClick={() => handleEnable(source)}
                   className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/60 transition-colors'
                 >
-                  站长审核并启用
-                </button>
-              ) : (
-                <span className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'>
-                  待站长决定
-                </span>
-              )}
-              {(source.from !== 'config' || role === 'owner') && (
-                <button
-                  onClick={() => handleDelete(source)}
-                  className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700/40 dark:hover:bg-gray-700/60 dark:text-gray-200 transition-colors'
-                >
-                  删除
+                  启用
                 </button>
               )}
+              <button
+                onClick={() => handleDelete(source)}
+                className='inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-gray-700/40 dark:hover:bg-gray-700/60 dark:text-gray-200 transition-colors'
+              >
+                删除
+              </button>
             </div>
           </div>
         </div>
@@ -1002,10 +958,6 @@ const VideoSourceConfig = ({
           </div>
         </div>
       )}
-
-      <div className='rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-relaxed text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200'>
-        管理员和站长都可以新增视频源并运行服务器抽检。抽检结果仅是安全建议，不会自动改变视频源状态；只有站长可以作出最终启用决定，管理员可以随时紧急禁用。
-      </div>
 
       {/* 响应式视频源卡片列表，避免移动端表格被压成逐字换行。 */}
       <DndContext
@@ -1911,21 +1863,25 @@ function AdminPageClient() {
               />
             </CollapsibleTab>
 
-            {/* 视频源配置标签 */}
-            <CollapsibleTab
-              title='视频源配置'
-              icon={
-                <Video size={20} className='text-gray-600 dark:text-gray-400' />
-              }
-              isExpanded={expandedTabs.videoSource}
-              onToggle={() => toggleTab('videoSource')}
-            >
-              <VideoSourceConfig
-                config={config}
-                role={role}
-                refreshConfig={fetchConfig}
-              />
-            </CollapsibleTab>
+            {/* 视频源只允许站长管理。 */}
+            {role === 'owner' && (
+              <CollapsibleTab
+                title='视频源配置'
+                icon={
+                  <Video
+                    size={20}
+                    className='text-gray-600 dark:text-gray-400'
+                  />
+                }
+                isExpanded={expandedTabs.videoSource}
+                onToggle={() => toggleTab('videoSource')}
+              >
+                <VideoSourceConfig
+                  config={config}
+                  refreshConfig={fetchConfig}
+                />
+              </CollapsibleTab>
+            )}
 
             {/* 分类配置标签 */}
             <CollapsibleTab

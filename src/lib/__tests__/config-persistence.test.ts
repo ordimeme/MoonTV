@@ -44,7 +44,13 @@ jest.mock('@/lib/runtime', () => ({
   __esModule: true,
   default: {
     cache_time: 7200,
-    api_site: {},
+    api_site: {
+      restored: {
+        key: 'restored',
+        name: '恢复源',
+        api: 'https://example.com/api.php/provide/vod/',
+      },
+    },
     custom_category: [],
   },
 }));
@@ -75,11 +81,16 @@ describe('database-backed config', () => {
     expect(config.SiteConfig.Announcement).toBe('站长公告');
     expect(config.UserConfig.AllowRegister).toBe(true);
     expect(config.CustomCategories).toEqual(storedConfig.CustomCategories);
+    expect(config.SourceConfig).toContainEqual(
+      expect.objectContaining({ key: 'restored', disabled: false })
+    );
     expect(config.Revision).toBe(7);
     expect(config.UserConfig.Users[0]).toEqual({
       username: 'owner',
       role: 'owner',
     });
+    expect(await getConfig()).toBe(config);
+    expect(getAdminConfig).toHaveBeenCalledTimes(1);
     expect(setAdminConfig).not.toHaveBeenCalled();
   });
 

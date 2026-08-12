@@ -18,19 +18,13 @@ import { ThemeProvider } from '../components/ThemeProvider';
 const inter = Inter({ subsets: ['latin'] });
 export const dynamic = 'force-dynamic';
 
-// 动态生成 metadata，支持配置更新后的标题变化
-export async function generateMetadata(): Promise<Metadata> {
-  let siteName = process.env.SITE_NAME || 'MoonTV';
-  const config = await getConfig();
-  siteName = config.SiteConfig.SiteName;
-
-  return {
-    title: siteName,
-    description: BRAND_DESCRIPTION,
-    manifest: '/manifest.json',
-    icons: { icon: '/brand-mark.svg' },
-  };
-}
+// D1 环境下站点名称来自环境变量，无需为 metadata 重复读取数据库。
+export const metadata: Metadata = {
+  title: process.env.SITE_NAME || 'MoonTV',
+  description: BRAND_DESCRIPTION,
+  manifest: '/manifest.json',
+  icons: { icon: '/brand-mark.svg' },
+};
 
 export const viewport: Viewport = {
   themeColor: '#000000',
