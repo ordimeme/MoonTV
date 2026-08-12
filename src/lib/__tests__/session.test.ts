@@ -51,4 +51,18 @@ describe('signed sessions', () => {
     ).resolves.toBeNull();
     expect(parseSessionToken('not-a-token')).toBeNull();
   });
+
+  it('reuses one imported HMAC key across session sign and verify', async () => {
+    const importKey = jest.spyOn(webcrypto.subtle, 'importKey');
+    const secret = 'session-cache-test-secret';
+    const token = await createSessionToken(
+      secret,
+      { username: 'alice', role: 'admin', mode: 'database' },
+      1_000
+    );
+    await verifySessionToken(token, secret, 2_000);
+
+    expect(importKey).toHaveBeenCalledTimes(1);
+    importKey.mockRestore();
+  });
 });

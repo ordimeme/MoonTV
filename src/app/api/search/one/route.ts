@@ -76,7 +76,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const results = await searchFromApi(targetSite, query);
+    const results = await searchFromApi(targetSite, query, {
+      maxPages: Math.min(
+        5,
+        Math.max(1, Number(config.SiteConfig.SearchDownstreamMaxPage) || 1)
+      ),
+      maxResults: 50,
+    });
     let result = results.filter((r) => r.title === query);
     if (!config.SiteConfig.DisableYellowFilter) {
       result = result.filter((result) => {
@@ -96,7 +102,7 @@ export async function GET(request: NextRequest) {
       const secret = getSessionSecret();
       if (!secret) throw new Error('服务器未配置会话密钥');
       const safeResults = await Promise.all(
-        result.map(async (item) => ({
+        result.slice(0, 5).map(async (item) => ({
           ...item,
           episodes: await relayMediaUrls(item.episodes, secret),
         }))

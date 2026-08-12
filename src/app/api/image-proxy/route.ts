@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+import { limitResponseStream } from '@/lib/media-relay';
+
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const ALLOWED_IMAGE_HOST_SUFFIXES = ['douban.com', 'doubanio.com'];
@@ -61,14 +63,22 @@ function validateImageUrl(value: string): URL | null {
 async function fetchImage(url: URL): Promise<Response> {
   let current = url;
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-    const response = await fetch(current, {
-      redirect: 'manual',
-      headers: {
-        Accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif',
-        Referer: 'https://movie.douban.com/',
-        'User-Agent': 'MoonTV image proxy',
-      },
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    let response: Response;
+    try {
+      response = await fetch(current, {
+        redirect: 'manual',
+        signal: controller.signal,
+        headers: {
+          Accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif',
+          Referer: 'https://movie.douban.com/',
+          'User-Agent': 'MoonTV image proxy',
+        },
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     const location = response.headers.get('location');
     if (!location) throw new Error('Invalid redirect');
@@ -111,22 +121,24 @@ export async function GET(request: Request) {
       );
     }
 
-    const body = await imageResponse.arrayBuffer();
-    if (body.byteLength > MAX_IMAGE_BYTES) {
+    if (!imageResponse.body) {
       return NextResponse.json(
-        { error: 'Image is too large' },
-        { status: 413 }
+        { error: 'Upstream image is empty' },
+        { status: 502 }
       );
     }
 
-    return new Response(body, {
-      status: 200,
-      headers: {
-        'Content-Type': contentType,
-        'X-Content-Type-Options': 'nosniff',
-        'Cache-Control': 'private, max-age=86400',
-      },
-    });
+    return new Response(
+      limitResponseStream(imageResponse.body, MAX_IMAGE_BYTES),
+      {
+        status: 200,
+        headers: {
+          'Content-Type': contentType,
+          'X-Content-Type-Options': 'nosniff',
+          'Cache-Control': 'private, max-age=86400',
+        },
+      }
+    );
   } catch {
     return NextResponse.json(
       { error: 'Error fetching image' },

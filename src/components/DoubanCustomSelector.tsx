@@ -71,13 +71,27 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
 
   // 处理二级选择器的鼠标滚轮事件（原生 DOM 事件）
   const handleSecondaryWheel = React.useCallback((e: WheelEvent) => {
+    const container = secondaryScrollContainerRef.current;
+    if (!container || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) {
+      return;
+    }
+
+    const maxScrollLeft = container.scrollWidth - container.clientWidth;
+    const scrollAmount = e.deltaY * 2;
+    const nextScrollLeft = Math.max(
+      0,
+      Math.min(maxScrollLeft, container.scrollLeft + scrollAmount)
+    );
+
+    // 只有选择器确实能沿滚轮方向横移时才接管事件；到达边缘后，
+    // 让事件继续冒泡，由页面正常上下滚动。
+    if (nextScrollLeft === container.scrollLeft) {
+      return;
+    }
+
     e.preventDefault();
     e.stopPropagation();
-    const container = secondaryScrollContainerRef.current;
-    if (container) {
-      const scrollAmount = e.deltaY * 2;
-      container.scrollLeft += scrollAmount;
-    }
+    container.scrollLeft = nextScrollLeft;
   }, []);
 
   // 添加二级选择器的鼠标滚轮事件监听器
@@ -100,27 +114,6 @@ const DoubanCustomSelector: React.FC<DoubanCustomSelectorProps> = ({
       };
     }
   }, [handleSecondaryWheel]);
-
-  // 当二级选项变化时重新添加事件监听器
-  useEffect(() => {
-    const scrollContainer = secondaryScrollContainerRef.current;
-    const capsuleContainer = secondaryContainerRef.current;
-
-    if (scrollContainer && capsuleContainer && secondaryOptions.length > 0) {
-      // 重新添加事件监听器
-      scrollContainer.addEventListener('wheel', handleSecondaryWheel, {
-        passive: false,
-      });
-      capsuleContainer.addEventListener('wheel', handleSecondaryWheel, {
-        passive: false,
-      });
-
-      return () => {
-        scrollContainer.removeEventListener('wheel', handleSecondaryWheel);
-        capsuleContainer.removeEventListener('wheel', handleSecondaryWheel);
-      };
-    }
-  }, [handleSecondaryWheel, secondaryOptions]);
 
   // 更新指示器位置的通用函数
   const updateIndicatorPosition = (

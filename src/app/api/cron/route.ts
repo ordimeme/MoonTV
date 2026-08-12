@@ -59,6 +59,10 @@ async function refreshRecordAndFavorites() {
     }
     // 函数级缓存：key 为 `${source}+${id}`，值为 Promise<VideoDetail | null>
     const detailCache = new Map<string, Promise<SearchResult | null>>();
+    const deadline = Date.now() + 20_000;
+    const maxDetailRequests = 20;
+    let detailRequests = 0;
+    let budgetExhausted = false;
 
     // 获取详情 Promise（带缓存和错误处理）
     const getDetail = async (
@@ -69,6 +73,11 @@ async function refreshRecordAndFavorites() {
       const key = `${source}+${id}`;
       let promise = detailCache.get(key);
       if (!promise) {
+        if (Date.now() >= deadline || detailRequests >= maxDetailRequests) {
+          budgetExhausted = true;
+          return null;
+        }
+        detailRequests += 1;
         promise = fetchVideoDetail({
           source,
           id,
@@ -89,6 +98,10 @@ async function refreshRecordAndFavorites() {
     };
 
     for (const user of users) {
+      if (budgetExhausted || Date.now() >= deadline) {
+        budgetExhausted = true;
+        break;
+      }
       console.log(`开始处理用户: ${user}`);
 
       // 播放记录
@@ -98,6 +111,10 @@ async function refreshRecordAndFavorites() {
         let processedRecords = 0;
 
         for (const [key, record] of Object.entries(playRecords)) {
+          if (budgetExhausted || Date.now() >= deadline) {
+            budgetExhausted = true;
+            break;
+          }
           try {
             const [source, id] = key.split('+');
             if (!source || !id) {
@@ -142,6 +159,11 @@ async function refreshRecordAndFavorites() {
         console.error(`获取用户播放记录失败 (${user}):`, err);
       }
 
+      if (budgetExhausted || Date.now() >= deadline) {
+        budgetExhausted = true;
+        break;
+      }
+
       // 收藏
       try {
         const favorites = await db.getAllFavorites(user);
@@ -149,6 +171,10 @@ async function refreshRecordAndFavorites() {
         let processedFavorites = 0;
 
         for (const [key, fav] of Object.entries(favorites)) {
+          if (budgetExhausted || Date.now() >= deadline) {
+            budgetExhausted = true;
+            break;
+          }
           try {
             const [source, id] = key.split('+');
             if (!source || !id) {
@@ -191,6 +217,11 @@ async function refreshRecordAndFavorites() {
       }
     }
 
+    if (budgetExhausted) {
+      console.warn(
+        `刷新任务达到单次预算，本次最多处理 ${maxDetailRequests} 个不同视频；其余留待下次任务`
+      );
+    }
     console.log('刷新播放记录/收藏任务完成');
   } catch (err) {
     console.error('刷新播放记录/收藏任务启动失败', err);

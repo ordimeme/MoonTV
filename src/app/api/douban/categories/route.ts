@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { getCacheTime } from '@/lib/config';
 import { DoubanItem, DoubanResult } from '@/lib/types';
+import { readJsonResponseLimited } from '@/lib/upstream-security';
 
 interface DoubanCategoryApiResponse {
   total: number;
@@ -47,7 +48,10 @@ async function fetchDoubanData(
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
 
-    return await response.json();
+    return await readJsonResponseLimited<DoubanCategoryApiResponse>(
+      response,
+      512 * 1024
+    );
   } catch (error) {
     clearTimeout(timeoutId);
     throw error;

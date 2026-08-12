@@ -1,6 +1,8 @@
 const MAX_MEDIA_URL_LENGTH = 4096;
 export const MAX_MANIFEST_BYTES = 2 * 1024 * 1024;
 export const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
+export const MAX_EPISODE_URLS = 1000;
+export const MAX_MANIFEST_REFERENCES = 5000;
 
 function base64Url(bytes: ArrayBuffer): string {
   return btoa(String.fromCharCode(...Array.from(new Uint8Array(bytes))))
@@ -68,14 +70,20 @@ export function isSafeMediaUrl(value: unknown): value is string {
   }
 }
 
+let cachedSigningKey: { secret: string; key: Promise<CryptoKey> } | undefined;
+
 async function importSigningKey(secret: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
+  if (cachedSigningKey?.secret === secret) return cachedSigningKey.key;
+
+  const key = crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(secret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign', 'verify']
   );
+  cachedSigningKey = { secret, key };
+  return key;
 }
 
 export async function signMediaUrl(
@@ -122,12 +130,76 @@ export async function createMediaRelayPath(
   return `/api/media?${params.toString()}`;
 }
 
+function getMediaScope(url: string): string {
+  const parsed = new URL(url);
+  const slash = parsed.pathname.lastIndexOf('/');
+  parsed.pathname = parsed.pathname.slice(0, slash + 1);
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.toString();
+}
+
+export function resolveScopedMediaUrl(
+  scope: string,
+  relativePath: string
+): string | null {
+  if (
+    !isSafeMediaUrl(scope) ||
+    !relativePath ||
+    relativePath.length > MAX_MEDIA_URL_LENGTH
+  ) {
+    return null;
+  }
+  try {
+    const scopeUrl = new URL(scope);
+    const resolved = new URL(relativePath, scopeUrl);
+    if (
+      resolved.origin !== scopeUrl.origin ||
+      !resolved.pathname.startsWith(scopeUrl.pathname) ||
+      !isSafeMediaUrl(resolved.toString())
+    ) {
+      return null;
+    }
+    return resolved.toString();
+  } catch {
+    return null;
+  }
+}
+
+async function createScopedMediaRelayPath(
+  url: string,
+  secret: string,
+  signatureCache: Map<string, Promise<string>>
+): Promise<string> {
+  if (!isSafeMediaUrl(url)) throw new Error('不安全的视频地址');
+  const scope = getMediaScope(url);
+  let signature = signatureCache.get(scope);
+  if (!signature) {
+    signature = signMediaUrl(scope, secret);
+    signatureCache.set(scope, signature);
+  }
+  const relativePath = new URL(url).toString().slice(scope.length);
+  const params = new URLSearchParams({
+    scope,
+    path: relativePath,
+    sig: await signature,
+  });
+  return `/api/media?${params.toString()}`;
+}
+
 export async function relayMediaUrls(
   urls: string[],
   secret: string
 ): Promise<string[]> {
-  const safeUrls = Array.from(new Set(urls)).filter(isSafeMediaUrl);
-  return Promise.all(safeUrls.map((url) => createMediaRelayPath(url, secret)));
+  const safeUrls = Array.from(new Set(urls))
+    .filter(isSafeMediaUrl)
+    .slice(0, MAX_EPISODE_URLS);
+  const signatureCache = new Map<string, Promise<string>>();
+  return Promise.all(
+    safeUrls.map((url) =>
+      createScopedMediaRelayPath(url, secret, signatureCache)
+    )
+  );
 }
 
 function resolveMediaUrl(value: string, baseUrl: string): string | null {
@@ -146,6 +218,8 @@ export async function rewriteHlsManifest(
 ): Promise<string> {
   const lines = manifest.split(/\r?\n/);
   const rewritten: string[] = [];
+  const signatureCache = new Map<string, Promise<string>>();
+  let referenceCount = 0;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -154,15 +228,25 @@ export async function rewriteHlsManifest(
       continue;
     }
     if (!trimmed.startsWith('#')) {
+      referenceCount += 1;
+      if (referenceCount > MAX_MANIFEST_REFERENCES) {
+        throw new Error('播放清单引用过多');
+      }
       const resolved = resolveMediaUrl(trimmed, manifestUrl);
       rewritten.push(
-        resolved ? await createMediaRelayPath(resolved, secret) : '# blocked'
+        resolved
+          ? await createScopedMediaRelayPath(resolved, secret, signatureCache)
+          : '# blocked'
       );
       continue;
     }
 
     let nextLine = line;
     const uriMatches = Array.from(line.matchAll(/URI="([^"]+)"/g));
+    referenceCount += uriMatches.length;
+    if (referenceCount > MAX_MANIFEST_REFERENCES) {
+      throw new Error('播放清单引用过多');
+    }
     for (const match of uriMatches) {
       const resolved = resolveMediaUrl(match[1], manifestUrl);
       if (!resolved) {
@@ -171,7 +255,11 @@ export async function rewriteHlsManifest(
       }
       nextLine = nextLine.replace(
         match[0],
-        `URI="${await createMediaRelayPath(resolved, secret)}"`
+        `URI="${await createScopedMediaRelayPath(
+          resolved,
+          secret,
+          signatureCache
+        )}"`
       );
     }
     rewritten.push(nextLine);

@@ -26,11 +26,22 @@ interface ApiResponse {
   pagecount?: number;
 }
 
+interface SearchFromApiOptions {
+  includeDescriptions?: boolean;
+  maxPages?: number;
+  maxResults?: number;
+  timeoutMs?: number;
+}
+
+const MAX_SEARCH_RESPONSE_BYTES = 512 * 1024;
+
 export async function searchFromApi(
   apiSite: ApiSite,
-  query: string
+  query: string,
+  options: SearchFromApiOptions = {}
 ): Promise<SearchResult[]> {
   try {
+    const maxResults = Math.max(1, Math.min(100, options.maxResults ?? 100));
     const apiBaseUrl = apiSite.api;
     if (!isSafeUpstreamUrl(apiBaseUrl)) return [];
     const apiUrl =
@@ -39,20 +50,34 @@ export async function searchFromApi(
 
     // 添加超时处理
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutMs = Math.max(
+      1_000,
+      Math.min(10_000, options.timeoutMs ?? 8_000)
+    );
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    const response = await fetchSafeUpstream(apiUrl, {
-      headers: API_CONFIG.search.headers,
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
+    let response: Response;
+    try {
+      response = await fetchSafeUpstream(
+        apiUrl,
+        {
+          headers: API_CONFIG.search.headers,
+          signal: controller.signal,
+        },
+        1
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
       return [];
     }
 
-    const data = await readJsonResponseLimited<ApiResponse>(response);
+    const data = await readJsonResponseLimited<ApiResponse>(
+      response,
+      MAX_SEARCH_RESPONSE_BYTES
+    );
     if (
       !data ||
       !data.list ||
@@ -62,56 +87,63 @@ export async function searchFromApi(
       return [];
     }
     // 处理第一页结果
-    const results = data.list.map((item: ApiSearchItem) => {
-      let episodes: string[] = [];
+    const results = data.list
+      .slice(0, maxResults)
+      .map((item: ApiSearchItem) => {
+        let episodes: string[] = [];
 
-      // 使用正则表达式从 vod_play_url 提取 m3u8 链接
-      if (item.vod_play_url) {
-        const m3u8Regex = /\$(https?:\/\/[^"'\s]+?\.m3u8)/g;
-        // 先用 $$$ 分割
-        const vod_play_url_array = item.vod_play_url.split('$$$');
-        // 对每个分片做匹配，取匹配到最多的作为结果
-        vod_play_url_array.forEach((url: string) => {
-          const matches = url.match(m3u8Regex) || [];
-          if (matches.length > episodes.length) {
-            episodes = matches;
-          }
+        // 使用正则表达式从 vod_play_url 提取 m3u8 链接
+        if (item.vod_play_url) {
+          const m3u8Regex = /\$(https?:\/\/[^"'\s]+?\.m3u8)/g;
+          // 先用 $$$ 分割
+          const vod_play_url_array = item.vod_play_url.split('$$$');
+          // 对每个分片做匹配，取匹配到最多的作为结果
+          vod_play_url_array.forEach((url: string) => {
+            const matches = url.match(m3u8Regex) || [];
+            if (matches.length > episodes.length) {
+              episodes = matches;
+            }
+          });
+        }
+
+        episodes = Array.from(new Set(episodes)).map((link: string) => {
+          link = link.substring(1); // 去掉开头的 $
+          const parenIndex = link.indexOf('(');
+          return parenIndex > 0 ? link.substring(0, parenIndex) : link;
         });
-      }
 
-      episodes = Array.from(new Set(episodes)).map((link: string) => {
-        link = link.substring(1); // 去掉开头的 $
-        const parenIndex = link.indexOf('(');
-        return parenIndex > 0 ? link.substring(0, parenIndex) : link;
+        return {
+          id: item.vod_id.toString(),
+          title: item.vod_name.trim().replace(/\s+/g, ' '),
+          poster: item.vod_pic,
+          episodes,
+          source: apiSite.key,
+          source_name: apiName,
+          class: item.vod_class,
+          year: item.vod_year
+            ? item.vod_year.match(/\d{4}/)?.[0] || ''
+            : 'unknown',
+          desc:
+            options.includeDescriptions === false
+              ? ''
+              : cleanHtmlTags(item.vod_content || ''),
+          type_name: item.type_name,
+          douban_id: item.vod_douban_id,
+        };
       });
 
-      return {
-        id: item.vod_id.toString(),
-        title: item.vod_name.trim().replace(/\s+/g, ' '),
-        poster: item.vod_pic,
-        episodes,
-        source: apiSite.key,
-        source_name: apiName,
-        class: item.vod_class,
-        year: item.vod_year
-          ? item.vod_year.match(/\d{4}/)?.[0] || ''
-          : 'unknown',
-        desc: cleanHtmlTags(item.vod_content || ''),
-        type_name: item.type_name,
-        douban_id: item.vod_douban_id,
-      };
-    });
-
-    const config = await getConfig();
-    const MAX_SEARCH_PAGES = Math.max(
+    const configuredMaxPages =
+      options.maxPages ??
+      (await getConfig()).SiteConfig.SearchDownstreamMaxPage;
+    const maxSearchPages = Math.max(
       1,
-      Math.min(10, Number(config.SiteConfig.SearchDownstreamMaxPage) || 1)
+      Math.min(10, Number(configuredMaxPages) || 1)
     );
 
     // 获取总页数
     const pageCount = data.pagecount || 1;
     // 确定需要获取的额外页数
-    const pagesToFetch = Math.min(pageCount - 1, MAX_SEARCH_PAGES - 1);
+    const pagesToFetch = Math.min(pageCount - 1, maxSearchPages - 1);
 
     // 如果有额外页数，获取更多页的结果
     if (pagesToFetch > 0) {
@@ -129,56 +161,69 @@ export async function searchFromApi(
             const pageController = new AbortController();
             const pageTimeoutId = setTimeout(
               () => pageController.abort(),
-              8000
+              timeoutMs
             );
 
-            const pageResponse = await fetchSafeUpstream(pageUrl, {
-              headers: API_CONFIG.search.headers,
-              signal: pageController.signal,
-            });
-
-            clearTimeout(pageTimeoutId);
+            let pageResponse: Response;
+            try {
+              pageResponse = await fetchSafeUpstream(
+                pageUrl,
+                {
+                  headers: API_CONFIG.search.headers,
+                  signal: pageController.signal,
+                },
+                1
+              );
+            } finally {
+              clearTimeout(pageTimeoutId);
+            }
 
             if (!pageResponse.ok) return [];
 
             const pageData = await readJsonResponseLimited<ApiResponse>(
-              pageResponse
+              pageResponse,
+              MAX_SEARCH_RESPONSE_BYTES
             );
 
             if (!pageData || !pageData.list || !Array.isArray(pageData.list))
               return [];
 
-            return pageData.list.map((item: ApiSearchItem) => {
-              let episodes: string[] = [];
+            return pageData.list
+              .slice(0, maxResults)
+              .map((item: ApiSearchItem) => {
+                let episodes: string[] = [];
 
-              // 使用正则表达式从 vod_play_url 提取 m3u8 链接
-              if (item.vod_play_url) {
-                const m3u8Regex = /\$(https?:\/\/[^"'\s]+?\.m3u8)/g;
-                episodes = item.vod_play_url.match(m3u8Regex) || [];
-              }
+                // 使用正则表达式从 vod_play_url 提取 m3u8 链接
+                if (item.vod_play_url) {
+                  const m3u8Regex = /\$(https?:\/\/[^"'\s]+?\.m3u8)/g;
+                  episodes = item.vod_play_url.match(m3u8Regex) || [];
+                }
 
-              episodes = Array.from(new Set(episodes)).map((link: string) => {
-                link = link.substring(1); // 去掉开头的 $
-                const parenIndex = link.indexOf('(');
-                return parenIndex > 0 ? link.substring(0, parenIndex) : link;
+                episodes = Array.from(new Set(episodes)).map((link: string) => {
+                  link = link.substring(1); // 去掉开头的 $
+                  const parenIndex = link.indexOf('(');
+                  return parenIndex > 0 ? link.substring(0, parenIndex) : link;
+                });
+
+                return {
+                  id: item.vod_id.toString(),
+                  title: item.vod_name.trim().replace(/\s+/g, ' '),
+                  poster: item.vod_pic,
+                  episodes,
+                  source: apiSite.key,
+                  source_name: apiName,
+                  class: item.vod_class,
+                  year: item.vod_year
+                    ? item.vod_year.match(/\d{4}/)?.[0] || ''
+                    : 'unknown',
+                  desc:
+                    options.includeDescriptions === false
+                      ? ''
+                      : cleanHtmlTags(item.vod_content || ''),
+                  type_name: item.type_name,
+                  douban_id: item.vod_douban_id,
+                };
               });
-
-              return {
-                id: item.vod_id.toString(),
-                title: item.vod_name.trim().replace(/\s+/g, ' '),
-                poster: item.vod_pic,
-                episodes,
-                source: apiSite.key,
-                source_name: apiName,
-                class: item.vod_class,
-                year: item.vod_year
-                  ? item.vod_year.match(/\d{4}/)?.[0] || ''
-                  : 'unknown',
-                desc: cleanHtmlTags(item.vod_content || ''),
-                type_name: item.type_name,
-                douban_id: item.vod_douban_id,
-              };
-            });
           } catch (error) {
             return [];
           }
@@ -198,7 +243,7 @@ export async function searchFromApi(
       });
     }
 
-    return results;
+    return results.slice(0, maxResults);
   } catch (error) {
     return [];
   }
@@ -226,12 +271,15 @@ export async function getDetailFromApi(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-  const response = await fetchSafeUpstream(detailUrl, {
-    headers: API_CONFIG.detail.headers,
-    signal: controller.signal,
-  });
-
-  clearTimeout(timeoutId);
+  let response: Response;
+  try {
+    response = await fetchSafeUpstream(detailUrl, {
+      headers: API_CONFIG.detail.headers,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     throw new Error(`详情请求失败: ${response.status}`);
@@ -301,12 +349,15 @@ async function handleSpecialSourceDetail(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-  const response = await fetchSafeUpstream(detailUrl, {
-    headers: API_CONFIG.detail.headers,
-    signal: controller.signal,
-  });
-
-  clearTimeout(timeoutId);
+  let response: Response;
+  try {
+    response = await fetchSafeUpstream(detailUrl, {
+      headers: API_CONFIG.detail.headers,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     throw new Error(`详情页请求失败: ${response.status}`);

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { mapWithConcurrency } from '@/lib/async-utils';
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import {
   checkRateLimits,
@@ -9,8 +10,7 @@ import {
 } from '@/lib/auth-rate-limit';
 import { getAvailableApiSites, getCacheTime, getConfig } from '@/lib/config';
 import { searchFromApi } from '@/lib/downstream';
-import { relayMediaUrls } from '@/lib/media-relay';
-import { getSessionSecret } from '@/lib/session';
+import { createLightweightSearchResult } from '@/lib/media-match';
 import { yellowWords } from '@/lib/yellow';
 
 export async function GET(request: NextRequest) {
@@ -58,10 +58,17 @@ export async function GET(request: NextRequest) {
 
   const config = await getConfig();
   const apiSites = await getAvailableApiSites();
-  const searchPromises = apiSites.map((site) => searchFromApi(site, query));
-
   try {
-    const results = await Promise.all(searchPromises);
+    // 普通搜索只取每个源的第一页，并限制同时请求的源数量。20 个源从
+    // 最坏约 100 个上游请求降为最多 20 个、同时不超过 4 个。
+    const results = await mapWithConcurrency(apiSites, 4, (site) =>
+      searchFromApi(site, query, {
+        includeDescriptions: false,
+        maxPages: 1,
+        maxResults: 25,
+        timeoutMs: 3_000,
+      })
+    );
     let flattenedResults = results.flat();
     if (!config.SiteConfig.DisableYellowFilter) {
       flattenedResults = flattenedResults.filter((result) => {
@@ -69,14 +76,9 @@ export async function GET(request: NextRequest) {
         return !yellowWords.some((word: string) => typeName.includes(word));
       });
     }
-    const secret = getSessionSecret();
-    if (!secret) throw new Error('服务器未配置会话密钥');
-    flattenedResults = await Promise.all(
-      flattenedResults.map(async (result) => ({
-        ...result,
-        episodes: await relayMediaUrls(result.episodes, secret),
-      }))
-    );
+    flattenedResults = flattenedResults
+      .slice(0, 250)
+      .map(createLightweightSearchResult);
     await getCacheTime();
 
     return NextResponse.json(

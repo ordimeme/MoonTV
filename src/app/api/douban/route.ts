@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server';
 
 import { getCacheTime } from '@/lib/config';
 import { DoubanItem, DoubanResult } from '@/lib/types';
+import {
+  readJsonResponseLimited,
+  readTextResponseLimited,
+} from '@/lib/upstream-security';
 
 interface DoubanApiResponse {
   subjects: Array<{
@@ -37,7 +41,10 @@ async function fetchDoubanData(url: string): Promise<DoubanApiResponse> {
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
 
-    return await response.json();
+    return await readJsonResponseLimited<DoubanApiResponse>(
+      response,
+      512 * 1024
+    );
   } catch (error) {
     clearTimeout(timeoutId);
     throw error;
@@ -147,7 +154,7 @@ function handleTop250(pageStart: number) {
       }
 
       // 获取 HTML 内容
-      const html = await fetchResponse.text();
+      const html = await readTextResponseLimited(fetchResponse, 1024 * 1024);
 
       // 通过正则同时捕获影片 id、标题、封面以及评分
       const moviePattern =

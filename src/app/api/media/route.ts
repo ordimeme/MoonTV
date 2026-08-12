@@ -4,6 +4,7 @@ import {
   limitResponseStream,
   MAX_MANIFEST_BYTES,
   MAX_MEDIA_BYTES,
+  resolveScopedMediaUrl,
   rewriteHlsManifest,
   verifyMediaUrlSignature,
 } from '@/lib/media-relay';
@@ -29,13 +30,21 @@ async function fetchMedia(
 ): Promise<Response> {
   let current = url;
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-    const response = await fetch(current, {
-      redirect: 'manual',
-      headers: {
-        Accept: 'application/vnd.apple.mpegurl,application/x-mpegURL,video/*',
-        ...(range ? { Range: range } : {}),
-      },
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    let response: Response;
+    try {
+      response = await fetch(current, {
+        redirect: 'manual',
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/vnd.apple.mpegurl,application/x-mpegURL,video/*',
+          ...(range ? { Range: range } : {}),
+        },
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     const location = response.headers.get('location');
     if (!location) throw new Error('视频源返回了无效跳转');
@@ -48,12 +57,20 @@ async function fetchMedia(
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
-  const url = requestUrl.searchParams.get('url') || '';
+  const legacyUrl = requestUrl.searchParams.get('url') || '';
+  const scope = requestUrl.searchParams.get('scope') || '';
+  const relativePath = requestUrl.searchParams.get('path') || '';
   const signature = requestUrl.searchParams.get('sig') || '';
   const secret = getSessionSecret();
-  if (!secret || !(await verifyMediaUrlSignature(url, signature, secret))) {
+  const signedValue = scope || legacyUrl;
+  if (
+    !secret ||
+    !(await verifyMediaUrlSignature(signedValue, signature, secret))
+  ) {
     return jsonError('无效的视频访问凭证', 403);
   }
+  const url = scope ? resolveScopedMediaUrl(scope, relativePath) : legacyUrl;
+  if (!url) return jsonError('无效的视频访问地址', 403);
 
   try {
     const upstream = await fetchMedia(url, request.headers.get('range'));

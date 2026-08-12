@@ -2,6 +2,18 @@ import { SearchResult } from './types';
 
 export type MediaSearchType = 'movie' | 'tv' | '';
 
+export function createLightweightSearchResult(
+  result: SearchResult
+): SearchResult {
+  return {
+    ...result,
+    // 搜索列表只需要集数，真正选中播放源后再生成安全播放短链。
+    episodes: result.episodes.map(() => ''),
+    // 播放简介由详情接口按需返回，避免聚合搜索响应携带大量正文。
+    desc: '',
+  };
+}
+
 export function normalizeMediaTitle(value: string): string {
   return value
     .normalize('NFKC')

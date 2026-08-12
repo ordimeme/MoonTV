@@ -207,8 +207,6 @@ export default function VideoCard({
         `/play?source=${actualSource}&id=${actualId}&title=${encodeURIComponent(
           actualTitle
         )}${actualYear ? `&year=${actualYear}` : ''}${
-          isAggregate ? '&prefer=true' : ''
-        }${
           actualQuery ? `&stitle=${encodeURIComponent(actualQuery.trim())}` : ''
         }${actualSearchType ? `&stype=${actualSearchType}` : ''}`
       );
@@ -220,7 +218,6 @@ export default function VideoCard({
     router,
     actualTitle,
     actualYear,
-    isAggregate,
     actualQuery,
     actualSearchType,
   ]);

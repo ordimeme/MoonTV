@@ -1,6 +1,9 @@
 /** @jest-environment node */
 
-import { matchPlayableSources } from '../media-match';
+import {
+  createLightweightSearchResult,
+  matchPlayableSources,
+} from '../media-match';
 import { SearchResult } from '../types';
 
 function result(overrides: Partial<SearchResult> = {}): SearchResult {
@@ -18,6 +21,19 @@ function result(overrides: Partial<SearchResult> = {}): SearchResult {
 }
 
 describe('media source matching', () => {
+  it('keeps episode counts without returning upstream media URLs', () => {
+    const lightweight = createLightweightSearchResult(
+      result({
+        episodes: [
+          'https://media.example.com/one.m3u8',
+          'https://media.example.com/two.m3u8',
+        ],
+      })
+    );
+
+    expect(lightweight.episodes).toEqual(['', '']);
+  });
+
   it('keeps an exact title when the source year differs', () => {
     expect(
       matchPlayableSources([result()], '换救计划', '2026', 'movie')

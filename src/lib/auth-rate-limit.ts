@@ -164,9 +164,11 @@ export async function createRateLimitKeys(
   scope: string,
   identity = ''
 ): Promise<string[]> {
-  const addressKey = await createRateLimitKey(request, scope);
-  if (!identity.trim()) return [addressKey];
-  const identityKey = await createRateLimitKey(request, scope, identity);
+  const [addressKey, identityKey] = await Promise.all([
+    createRateLimitKey(request, scope),
+    identity.trim() ? createRateLimitKey(request, scope, identity) : null,
+  ]);
+  if (!identityKey) return [addressKey];
   return identityKey === addressKey ? [addressKey] : [addressKey, identityKey];
 }
 
@@ -311,32 +313,44 @@ export async function recordRateLimitFailure(
   if (db) {
     try {
       await ensureTable(db);
-      const existing = await db
-        .prepare(
-          'SELECT attempts, window_start, blocked_until FROM auth_rate_limits WHERE key_hash = ?'
-        )
-        .bind(key)
-        .first<RateLimitRow>();
-      const withinWindow = Boolean(
-        existing && existing.window_start + policy.windowMs > now
-      );
-      const attempts = existing && withinWindow ? existing.attempts + 1 : 1;
-      const windowStart =
-        existing && withinWindow ? existing.window_start : now;
-      const blockedUntil =
-        attempts >= policy.maxAttempts ? now + policy.blockMs : 0;
       await db
         .prepare(
           `INSERT INTO auth_rate_limits
           (key_hash, attempts, window_start, blocked_until, updated_at)
-         VALUES (?, ?, ?, ?, ?)
+         VALUES (?, 1, ?, ?, ?)
          ON CONFLICT(key_hash) DO UPDATE SET
-          attempts = excluded.attempts,
-          window_start = excluded.window_start,
-          blocked_until = excluded.blocked_until,
+          attempts = CASE
+            WHEN auth_rate_limits.window_start + ? <= excluded.updated_at THEN 1
+            ELSE auth_rate_limits.attempts + 1
+          END,
+          window_start = CASE
+            WHEN auth_rate_limits.window_start + ? <= excluded.updated_at
+              THEN excluded.updated_at
+            ELSE auth_rate_limits.window_start
+          END,
+          blocked_until = CASE
+            WHEN (
+              CASE
+                WHEN auth_rate_limits.window_start + ? <= excluded.updated_at
+                  THEN 1
+                ELSE auth_rate_limits.attempts + 1
+              END
+            ) >= ? THEN excluded.updated_at + ?
+            ELSE 0
+          END,
           updated_at = excluded.updated_at`
         )
-        .bind(key, attempts, windowStart, blockedUntil, now)
+        .bind(
+          key,
+          now,
+          policy.maxAttempts === 1 ? now + policy.blockMs : 0,
+          now,
+          policy.windowMs,
+          policy.windowMs,
+          policy.windowMs,
+          policy.maxAttempts,
+          policy.blockMs
+        )
         .run();
       return;
     } catch {

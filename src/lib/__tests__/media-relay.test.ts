@@ -5,6 +5,9 @@ import { webcrypto } from 'node:crypto';
 import {
   createMediaRelayPath,
   isSafeMediaUrl,
+  MAX_MANIFEST_REFERENCES,
+  relayMediaUrls,
+  resolveScopedMediaUrl,
   rewriteHlsManifest,
   signMediaUrl,
   verifyMediaUrlSignature,
@@ -32,6 +35,59 @@ describe('media relay security', () => {
     await expect(
       verifyMediaUrlSignature(`${url}?changed=1`, signature, secret)
     ).resolves.toBe(false);
+  });
+
+  it('reuses the imported HMAC key across media URLs', async () => {
+    const importKey = jest.spyOn(webcrypto.subtle, 'importKey');
+    const cacheSecret = `${secret}-cache-test`;
+
+    await signMediaUrl('https://cdn.example.com/a/one.m3u8', cacheSecret);
+    await signMediaUrl('https://cdn.example.com/a/two.m3u8', cacheSecret);
+
+    expect(importKey).toHaveBeenCalledTimes(1);
+    importKey.mockRestore();
+  });
+
+  it('signs one directory scope for many episode URLs', async () => {
+    const sign = jest.spyOn(webcrypto.subtle, 'sign');
+    const paths = await relayMediaUrls(
+      [
+        'https://cdn.example.com/show/one.m3u8',
+        'https://cdn.example.com/show/two.m3u8',
+      ],
+      `${secret}-scope-test`
+    );
+
+    expect(sign).toHaveBeenCalledTimes(1);
+    expect(paths).toHaveLength(2);
+    expect(paths[0]).toContain('scope=');
+    expect(paths[0]).toContain('path=one.m3u8');
+    sign.mockRestore();
+  });
+
+  it('does not allow a scoped path to escape its signed directory', () => {
+    const scope = 'https://cdn.example.com/show/';
+    expect(resolveScopedMediaUrl(scope, 'part/one.ts')).toBe(
+      'https://cdn.example.com/show/part/one.ts'
+    );
+    expect(resolveScopedMediaUrl(scope, '../private.txt')).toBeNull();
+    expect(
+      resolveScopedMediaUrl(scope, 'https://other.example.com/x')
+    ).toBeNull();
+  });
+
+  it('rejects manifests with excessive references before unbounded signing', async () => {
+    const manifest = Array.from(
+      { length: MAX_MANIFEST_REFERENCES + 1 },
+      (_, index) => `segment-${index}.ts`
+    ).join('\n');
+    await expect(
+      rewriteHlsManifest(
+        manifest,
+        'https://cdn.example.com/show/index.m3u8',
+        `${secret}-manifest-budget`
+      )
+    ).rejects.toThrow('播放清单引用过多');
   });
 
   it('rewrites playlists, segments and encryption keys to same-origin paths', async () => {

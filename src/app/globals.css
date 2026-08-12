@@ -37,15 +37,19 @@
 html {
   min-height: 100%;
   overflow-x: hidden;
-  /* 阻止 iOS Safari 拉动回弹 */
-  overscroll-behavior: none;
+  overflow-y: auto;
+  /* 只抑制横向回弹，保留 PC 滚轮和键盘的纵向页面滚动。 */
+  overscroll-behavior-x: none;
+  overscroll-behavior-y: auto;
 }
 
 body {
   min-height: 100%;
   overflow-x: hidden;
-  /* 阻止 iOS Safari 拉动回弹 */
-  overscroll-behavior: none;
+  /* body 交由根滚动容器管理，避免形成第二个纵向滚动层。 */
+  overflow-y: visible;
+  overscroll-behavior-x: none;
+  overscroll-behavior-y: auto;
 }
 
 body {

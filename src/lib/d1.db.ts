@@ -7,6 +7,7 @@ import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
 
 // 搜索历史最大条数
 const SEARCH_HISTORY_LIMIT = 20;
+const USER_MEDIA_ITEM_LIMIT = 1000;
 
 // D1 数据库接口
 interface D1Database {
@@ -131,9 +132,9 @@ export class D1Storage implements IStorage {
       const db = await this.getDatabase();
       const result = await db
         .prepare(
-          'SELECT * FROM play_records WHERE username = ? ORDER BY save_time DESC'
+          'SELECT * FROM play_records WHERE username = ? ORDER BY save_time DESC LIMIT ?'
         )
-        .bind(userName)
+        .bind(userName, USER_MEDIA_ITEM_LIMIT)
         .all<any>();
 
       const records: Record<string, PlayRecord> = {};
@@ -171,6 +172,14 @@ export class D1Storage implements IStorage {
       console.error('Failed to delete play record:', err);
       throw err;
     }
+  }
+
+  async deleteAllPlayRecords(userName: string): Promise<void> {
+    const db = await this.getDatabase();
+    await db
+      .prepare('DELETE FROM play_records WHERE username = ?')
+      .bind(userName)
+      .run();
   }
 
   // 收藏相关
@@ -236,9 +245,9 @@ export class D1Storage implements IStorage {
       const db = await this.getDatabase();
       const result = await db
         .prepare(
-          'SELECT * FROM favorites WHERE username = ? ORDER BY save_time DESC'
+          'SELECT * FROM favorites WHERE username = ? ORDER BY save_time DESC LIMIT ?'
         )
-        .bind(userName)
+        .bind(userName, USER_MEDIA_ITEM_LIMIT)
         .all<any>();
 
       const favorites: Record<string, Favorite> = {};
@@ -273,6 +282,14 @@ export class D1Storage implements IStorage {
       console.error('Failed to delete favorite:', err);
       throw err;
     }
+  }
+
+  async deleteAllFavorites(userName: string): Promise<void> {
+    const db = await this.getDatabase();
+    await db
+      .prepare('DELETE FROM favorites WHERE username = ?')
+      .bind(userName)
+      .run();
   }
 
   // 用户相关
@@ -448,7 +465,8 @@ export class D1Storage implements IStorage {
     try {
       const db = await this.getDatabase();
       const result = await db
-        .prepare('SELECT username FROM users ORDER BY created_at ASC')
+        .prepare('SELECT username FROM users ORDER BY created_at ASC LIMIT ?')
+        .bind(USER_MEDIA_ITEM_LIMIT)
         .all<{ username: string }>();
 
       return result.results.map((row) => row.username);
@@ -599,9 +617,9 @@ export class D1Storage implements IStorage {
       const db = await this.getDatabase();
       const result = await db
         .prepare(
-          'SELECT source, id_video, enable, intro_time, outro_time FROM skip_configs WHERE username = ?'
+          'SELECT source, id_video, enable, intro_time, outro_time FROM skip_configs WHERE username = ? LIMIT ?'
         )
-        .bind(userName)
+        .bind(userName, USER_MEDIA_ITEM_LIMIT)
         .all<any>();
 
       const configs: { [key: string]: SkipConfig } = {};

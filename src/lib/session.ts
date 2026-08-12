@@ -34,14 +34,20 @@ function fromBase64Url(value: string): Uint8Array {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+let cachedSigningKey: { secret: string; key: Promise<CryptoKey> } | undefined;
+
 async function importSigningKey(secret: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
+  if (cachedSigningKey?.secret === secret) return cachedSigningKey.key;
+
+  const key = crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(secret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign', 'verify']
   );
+  cachedSigningKey = { secret, key };
+  return key;
 }
 
 export async function createSessionToken(
