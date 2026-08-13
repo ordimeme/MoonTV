@@ -11,7 +11,7 @@ import { BRAND_DESCRIPTION } from '@/lib/brand';
 import { clearUserCache } from '@/lib/db.client';
 import { clearPrivateApiCaches, fetchSession } from '@/lib/session.client';
 
-import { PandaMark } from '@/components/BrandLogo';
+import { BrandMark } from '@/components/BrandLogo';
 
 interface AuthInfo {
   username?: string;
@@ -385,7 +385,7 @@ export const UserMenu: React.FC = () => {
           <div className='my-1 border-t border-gray-200 dark:border-gray-700'></div>
 
           <div className='flex items-center justify-center gap-2 px-3 py-2 text-center text-xs text-gray-500 dark:text-gray-400'>
-            <PandaMark className='h-5 w-5 text-green-600' />
+            <BrandMark className='h-5 w-5 text-green-600' />
             <span>{BRAND_DESCRIPTION}</span>
           </div>
         </div>

@@ -23,10 +23,14 @@ function DoubanPageClient() {
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [loadMoreError, setLoadMoreError] = useState('');
+  const [loadMoreRetry, setLoadMoreRetry] = useState(0);
   const [selectorsReady, setSelectorsReady] = useState(false);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadingRef = useRef<HTMLDivElement>(null);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const initialRequestRef = useRef(0);
+  const loadMoreRequestRef = useRef(0);
 
   const type = searchParams.get('type') || 'movie';
 
@@ -151,9 +155,11 @@ function DoubanPageClient() {
 
   // 防抖的数据加载函数
   const loadInitialData = useCallback(async () => {
+    const requestId = ++initialRequestRef.current;
     try {
       setLoading(true);
       setLoadError('');
+      setLoadMoreError('');
       let data: DoubanResult;
 
       if (type === 'custom') {
@@ -169,14 +175,19 @@ function DoubanPageClient() {
             type: selectedCategory.type,
             pageLimit: 25,
             pageStart: 0,
+            notifyError: false,
           });
         } else {
           throw new Error('没有找到对应的分类');
         }
       } else {
-        data = await getDoubanCategories(getRequestParams(0));
+        data = await getDoubanCategories({
+          ...getRequestParams(0),
+          notifyError: false,
+        });
       }
 
+      if (requestId !== initialRequestRef.current) return;
       if (data.code === 200) {
         setDoubanData(data.list);
         setHasMore(data.list.length === 25);
@@ -185,10 +196,11 @@ function DoubanPageClient() {
         throw new Error(data.message || '获取数据失败');
       }
     } catch (err) {
+      if (requestId !== initialRequestRef.current) return;
       console.error(err);
       setLoadError(err instanceof Error ? err.message : '内容加载失败');
     } finally {
-      setLoading(false);
+      if (requestId === initialRequestRef.current) setLoading(false);
     }
   }, [
     type,
@@ -210,6 +222,9 @@ function DoubanPageClient() {
     setCurrentPage(0);
     setHasMore(true);
     setIsLoadingMore(false);
+    setLoadMoreError('');
+    initialRequestRef.current += 1;
+    loadMoreRequestRef.current += 1;
 
     // 清除之前的防抖定时器
     if (debounceTimeoutRef.current) {
@@ -239,8 +254,10 @@ function DoubanPageClient() {
   useEffect(() => {
     if (currentPage > 0) {
       const fetchMoreData = async () => {
+        const requestId = ++loadMoreRequestRef.current;
         try {
           setIsLoadingMore(true);
+          setLoadMoreError('');
 
           let data: DoubanResult;
           if (type === 'custom') {
@@ -257,16 +274,19 @@ function DoubanPageClient() {
                 type: selectedCategory.type,
                 pageLimit: 25,
                 pageStart: currentPage * 25,
+                notifyError: false,
               });
             } else {
               throw new Error('没有找到对应的分类');
             }
           } else {
-            data = await getDoubanCategories(
-              getRequestParams(currentPage * 25)
-            );
+            data = await getDoubanCategories({
+              ...getRequestParams(currentPage * 25),
+              notifyError: false,
+            });
           }
 
+          if (requestId !== loadMoreRequestRef.current) return;
           if (data.code === 200) {
             setDoubanData((prev) => [...prev, ...data.list]);
             setHasMore(data.list.length === 25);
@@ -274,11 +294,14 @@ function DoubanPageClient() {
             throw new Error(data.message || '获取数据失败');
           }
         } catch (err) {
+          if (requestId !== loadMoreRequestRef.current) return;
           console.error(err);
-          setLoadError(err instanceof Error ? err.message : '加载更多失败');
+          setLoadMoreError('后续内容暂时加载失败');
           setHasMore(false);
         } finally {
-          setIsLoadingMore(false);
+          if (requestId === loadMoreRequestRef.current) {
+            setIsLoadingMore(false);
+          }
         }
       };
 
@@ -290,12 +313,19 @@ function DoubanPageClient() {
     primarySelection,
     secondarySelection,
     customCategories,
+    loadMoreRetry,
   ]);
 
   // 设置滚动监听
   useEffect(() => {
     // 如果没有更多数据或正在加载，则不设置监听
-    if (!hasMore || isLoadingMore || loading) {
+    if (
+      !selectorsReady ||
+      doubanData.length === 0 ||
+      !hasMore ||
+      isLoadingMore ||
+      loading
+    ) {
       return;
     }
 
@@ -321,7 +351,7 @@ function DoubanPageClient() {
         observerRef.current.disconnect();
       }
     };
-  }, [hasMore, isLoadingMore, loading]);
+  }, [selectorsReady, doubanData.length, hasMore, isLoadingMore, loading]);
 
   // 处理选择器变化
   const handlePrimaryChange = useCallback(
@@ -481,7 +511,25 @@ function DoubanPageClient() {
 
           {/* 没有更多数据提示 */}
           {!hasMore && doubanData.length > 0 && (
-            <div className='text-center text-gray-500 py-8'>已加载全部内容</div>
+            <div className='py-8 text-center text-gray-500'>
+              {loadMoreError ? (
+                <div className='inline-flex flex-col items-center gap-2'>
+                  <span>{loadMoreError}</span>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      setLoadMoreError('');
+                      setLoadMoreRetry((value) => value + 1);
+                    }}
+                    className='min-h-11 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:border-green-500 hover:text-green-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'
+                  >
+                    重试加载更多
+                  </button>
+                </div>
+              ) : (
+                '已加载全部内容'
+              )}
+            </div>
           )}
 
           {/* 空状态 */}

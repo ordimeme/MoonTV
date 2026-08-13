@@ -1,6 +1,12 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-explicit-any, no-console */
 
-import { CheckCircle, Heart, Link, PlayCircleIcon } from 'lucide-react';
+import {
+  CheckCircle,
+  Heart,
+  ImageOff,
+  Link,
+  PlayCircleIcon,
+} from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -16,6 +22,7 @@ import {
 import { SearchResult } from '@/lib/types';
 import { processImageUrl } from '@/lib/utils';
 
+import { triggerGlobalError } from '@/components/GlobalErrorIndicator';
 import { ImagePlaceholder } from '@/components/ImagePlaceholder';
 
 interface VideoCardProps {
@@ -57,7 +64,9 @@ export default function VideoCard({
 }: VideoCardProps) {
   const router = useRouter();
   const [favorited, setFavorited] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [imageState, setImageState] = useState<'loading' | 'loaded' | 'failed'>(
+    'loading'
+  );
 
   const isAggregate = from === 'search' && !!items?.length;
 
@@ -100,12 +109,18 @@ export default function VideoCard({
   const actualPoster = aggregateData?.first.poster ?? poster;
   const actualSource = aggregateData?.first.source ?? source;
   const actualId = aggregateData?.first.id ?? id;
-  const actualDoubanId = String(
-    aggregateData?.mostFrequentDoubanId ?? douban_id
-  );
+  const rawDoubanId = aggregateData?.mostFrequentDoubanId ?? douban_id;
+  const actualDoubanId =
+    rawDoubanId === undefined || rawDoubanId === null || rawDoubanId === 0
+      ? ''
+      : String(rawDoubanId);
   const actualEpisodes = aggregateData?.mostFrequentEpisodes ?? episodes;
   const actualYear = aggregateData?.first.year ?? year;
   const actualQuery = query || '';
+  const posterUrl = useMemo(
+    () => (actualPoster ? processImageUrl(actualPoster) : ''),
+    [actualPoster]
+  );
   const actualSearchType = isAggregate
     ? aggregateData?.first.episodes?.length === 1
       ? 'movie'
@@ -121,7 +136,7 @@ export default function VideoCard({
         const fav = await isFavorited(actualSource, actualId);
         setFavorited(fav);
       } catch (err) {
-        throw new Error('检查收藏状态失败');
+        console.warn('检查收藏状态失败', err);
       }
     };
 
@@ -164,7 +179,8 @@ export default function VideoCard({
           setFavorited(true);
         }
       } catch (err) {
-        throw new Error('切换收藏状态失败');
+        console.warn('切换收藏状态失败', err);
+        triggerGlobalError('收藏操作失败，请稍后重试');
       }
     },
     [
@@ -189,7 +205,8 @@ export default function VideoCard({
         await deletePlayRecord(actualSource, actualId);
         onDelete?.();
       } catch (err) {
-        throw new Error('删除播放记录失败');
+        console.warn('删除播放记录失败', err);
+        triggerGlobalError('删除播放记录失败，请稍后重试');
       }
     },
     [from, actualSource, actualId, onDelete]
@@ -221,6 +238,10 @@ export default function VideoCard({
     actualQuery,
     actualSearchType,
   ]);
+
+  useEffect(() => {
+    setImageState(posterUrl ? 'loading' : 'failed');
+  }, [posterUrl]);
 
   const config = useMemo(() => {
     const configs = {
@@ -281,16 +302,29 @@ export default function VideoCard({
       {/* 海报容器 */}
       <div className='relative aspect-[2/3] overflow-hidden rounded-lg'>
         {/* 骨架屏 */}
-        {!isLoading && <ImagePlaceholder aspectRatio='aspect-[2/3]' />}
+        {imageState === 'loading' && (
+          <ImagePlaceholder aspectRatio='aspect-[2/3]' />
+        )}
+        {imageState === 'failed' && (
+          <div className='absolute inset-0 flex flex-col items-center justify-center gap-2 bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'>
+            <ImageOff className='h-8 w-8' aria-hidden='true' />
+            <span className='text-xs'>暂无海报</span>
+          </div>
+        )}
         {/* 图片 */}
-        <Image
-          src={processImageUrl(actualPoster)}
-          alt={actualTitle}
-          fill
-          className='object-cover'
-          referrerPolicy='no-referrer'
-          onLoad={() => setIsLoading(true)}
-        />
+        {posterUrl && imageState !== 'failed' && (
+          <Image
+            src={posterUrl}
+            alt={actualTitle}
+            fill
+            className={`object-cover transition-opacity duration-200 ${
+              imageState === 'loaded' ? 'opacity-100' : 'opacity-0'
+            }`}
+            referrerPolicy='no-referrer'
+            onLoad={() => setImageState('loaded')}
+            onError={() => setImageState('failed')}
+          />
+        )}
 
         {/* 悬浮遮罩 */}
         <div className='absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 transition-opacity duration-300 ease-in-out group-hover:opacity-100' />
@@ -376,7 +410,7 @@ export default function VideoCard({
         <div className='mt-1 h-1 w-full bg-gray-200 rounded-full overflow-hidden'>
           <div
             className='h-full bg-green-500 transition-all duration-500 ease-out'
-            style={{ width: `${progress}%` }}
+            style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
           />
         </div>
       )}

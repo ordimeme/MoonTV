@@ -64,28 +64,36 @@ function HomeClient() {
       try {
         setLoading(true);
 
-        // 并行获取热门电影、热门剧集和热门综艺
-        const [moviesData, tvShowsData, varietyShowsData] = await Promise.all([
+        // 三个栏目独立加载，单个豆瓣分类故障不应拖空整个首页。
+        const results = await Promise.allSettled([
           getDoubanCategories({
             kind: 'movie',
             category: '热门',
             type: '全部',
+            notifyError: false,
           }),
-          getDoubanCategories({ kind: 'tv', category: 'tv', type: 'tv' }),
-          getDoubanCategories({ kind: 'tv', category: 'show', type: 'show' }),
+          getDoubanCategories({
+            kind: 'tv',
+            category: 'tv',
+            type: 'tv',
+            notifyError: false,
+          }),
+          getDoubanCategories({
+            kind: 'tv',
+            category: 'show',
+            type: 'show',
+            notifyError: false,
+          }),
         ]);
 
-        if (moviesData.code === 200) {
-          setHotMovies(moviesData.list);
-        }
-
-        if (tvShowsData.code === 200) {
-          setHotTvShows(tvShowsData.list);
-        }
-
-        if (varietyShowsData.code === 200) {
-          setHotVarietyShows(varietyShowsData.list);
-        }
+        const setters = [setHotMovies, setHotTvShows, setHotVarietyShows];
+        results.forEach((result, index) => {
+          if (result.status === 'fulfilled' && result.value.code === 200) {
+            setters[index](result.value.list);
+          } else if (result.status === 'rejected') {
+            console.warn(`首页豆瓣栏目 ${index + 1} 加载失败`, result.reason);
+          }
+        });
       } catch (error) {
         console.error('获取豆瓣数据失败:', error);
       } finally {

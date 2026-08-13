@@ -20,9 +20,16 @@ interface DoubanCategoryApiResponse {
   }>;
 }
 
-async function fetchDoubanData(
-  url: string
-): Promise<DoubanCategoryApiResponse> {
+interface DoubanListApiResponse {
+  subjects: Array<{
+    id: string;
+    title: string;
+    cover?: string;
+    rate?: string;
+  }>;
+}
+
+async function fetchDoubanData<T>(url: string): Promise<T> {
   // 添加超时控制
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
@@ -48,10 +55,7 @@ async function fetchDoubanData(
       throw new Error(`HTTP error! Status: ${response.status}`);
     }
 
-    return await readJsonResponseLimited<DoubanCategoryApiResponse>(
-      response,
-      512 * 1024
-    );
+    return await readJsonResponseLimited<T>(response, 512 * 1024);
   } catch (error) {
     clearTimeout(timeoutId);
     throw error;
@@ -83,34 +87,69 @@ export async function GET(request: Request) {
     );
   }
 
-  if (pageLimit < 1 || pageLimit > 100) {
+  if (!Number.isInteger(pageLimit) || pageLimit < 1 || pageLimit > 100) {
     return NextResponse.json(
       { error: 'pageSize 必须在 1-100 之间' },
       { status: 400 }
     );
   }
 
-  if (pageStart < 0) {
+  if (!Number.isInteger(pageStart) || pageStart < 0) {
     return NextResponse.json(
       { error: 'pageStart 不能小于 0' },
       { status: 400 }
     );
   }
 
-  const target = `https://m.douban.com/rexxar/api/v2/subject/recent_hot/${kind}?start=${pageStart}&limit=${pageLimit}&category=${category}&type=${type}`;
+  if (category.length > 64 || type.length > 64) {
+    return NextResponse.json({ error: '分类参数过长' }, { status: 400 });
+  }
+
+  const categoryParams = new URLSearchParams({
+    start: String(pageStart),
+    limit: String(pageLimit),
+    category,
+    type,
+  });
+  const target = `https://m.douban.com/rexxar/api/v2/subject/recent_hot/${kind}?${categoryParams}`;
 
   try {
     // 调用豆瓣 API
-    const doubanData = await fetchDoubanData(target);
+    let list: DoubanItem[] = [];
+    try {
+      const doubanData = await fetchDoubanData<DoubanCategoryApiResponse>(
+        target
+      );
+      list = (doubanData.items || []).map((item) => ({
+        id: item.id,
+        title: item.title,
+        poster: item.pic?.normal || item.pic?.large || '',
+        rate: item.rating?.value ? item.rating.value.toFixed(1) : '',
+        year: item.card_subtitle?.match(/(\d{4})/)?.[1] || '',
+      }));
+      if (list.length === 0) throw new Error('豆瓣热门接口返回空列表');
+    } catch {
+      const fallbackTag = category === 'show' ? '综艺' : '热门';
+      const fallbackParams = new URLSearchParams({
+        type: kind,
+        tag: fallbackTag,
+        sort: 'recommend',
+        page_limit: String(pageLimit),
+        page_start: String(pageStart),
+      });
+      const fallbackData = await fetchDoubanData<DoubanListApiResponse>(
+        `https://movie.douban.com/j/search_subjects?${fallbackParams}`
+      );
+      list = (fallbackData.subjects || []).map((item) => ({
+        id: item.id,
+        title: item.title,
+        poster: item.cover || '',
+        rate: item.rate || '',
+        year: '',
+      }));
+    }
 
-    // 转换数据格式
-    const list: DoubanItem[] = doubanData.items.map((item) => ({
-      id: item.id,
-      title: item.title,
-      poster: item.pic?.normal || item.pic?.large || '',
-      rate: item.rating?.value ? item.rating.value.toFixed(1) : '',
-      year: item.card_subtitle?.match(/(\d{4})/)?.[1] || '',
-    }));
+    if (list.length === 0) throw new Error('豆瓣接口返回空列表');
 
     const response: DoubanResult = {
       code: 200,
