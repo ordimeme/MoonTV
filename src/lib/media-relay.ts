@@ -1,8 +1,11 @@
+import { isDirectMediaUrlAllowed } from './security';
+
 const MAX_MEDIA_URL_LENGTH = 4096;
 export const MAX_MANIFEST_BYTES = 2 * 1024 * 1024;
 export const MAX_MEDIA_BYTES = 64 * 1024 * 1024;
 export const MAX_EPISODE_URLS = 1000;
 export const MAX_MANIFEST_REFERENCES = 5000;
+export const DIRECT_HLS_REFERENCE_THRESHOLD = 500;
 
 function base64Url(bytes: ArrayBuffer): string {
   return btoa(String.fromCharCode(...Array.from(new Uint8Array(bytes))))
@@ -219,7 +222,28 @@ export async function rewriteHlsManifest(
   const lines = manifest.split(/\r?\n/);
   const rewritten: string[] = [];
   const signatureCache = new Map<string, Promise<string>>();
-  let referenceCount = 0;
+  const referenceCount = lines.reduce((count, line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return count;
+    if (!trimmed.startsWith('#')) return count + 1;
+    return count + Array.from(line.matchAll(/URI="([^"]+)"/g)).length;
+  }, 0);
+  if (referenceCount > MAX_MANIFEST_REFERENCES) {
+    throw new Error('播放清单引用过多');
+  }
+
+  // Long VOD playlists regularly contain thousands of two-second segments.
+  // Signing and expanding every segment inside one Worker request wastes CPU
+  // and can hit Cloudflare's resource ceiling. Keep segment URLs absolute and
+  // direct in large lists; encryption keys/maps stay on the signed relay.
+  const keepLargeManifestSegmentsDirect =
+    referenceCount > DIRECT_HLS_REFERENCE_THRESHOLD &&
+    lines.every((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return true;
+      const resolved = resolveMediaUrl(trimmed, manifestUrl);
+      return Boolean(resolved && isDirectMediaUrlAllowed(resolved));
+    });
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -228,14 +252,12 @@ export async function rewriteHlsManifest(
       continue;
     }
     if (!trimmed.startsWith('#')) {
-      referenceCount += 1;
-      if (referenceCount > MAX_MANIFEST_REFERENCES) {
-        throw new Error('播放清单引用过多');
-      }
       const resolved = resolveMediaUrl(trimmed, manifestUrl);
       rewritten.push(
         resolved
-          ? await createScopedMediaRelayPath(resolved, secret, signatureCache)
+          ? keepLargeManifestSegmentsDirect
+            ? resolved
+            : await createScopedMediaRelayPath(resolved, secret, signatureCache)
           : '# blocked'
       );
       continue;
@@ -243,10 +265,6 @@ export async function rewriteHlsManifest(
 
     let nextLine = line;
     const uriMatches = Array.from(line.matchAll(/URI="([^"]+)"/g));
-    referenceCount += uriMatches.length;
-    if (referenceCount > MAX_MANIFEST_REFERENCES) {
-      throw new Error('播放清单引用过多');
-    }
     for (const match of uriMatches) {
       const resolved = resolveMediaUrl(match[1], manifestUrl);
       if (!resolved) {

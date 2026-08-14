@@ -178,7 +178,9 @@ function PlayPageClient() {
   const sourceChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const firstFrameTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const relayFallbackAttemptedRef = useRef<string>('');
-  const automaticSourceAttemptsRef = useRef<Set<string>>(new Set());
+  const activeVideoUrlRef = useRef('');
+  const playbackRecoveryInFlightRef = useRef(false);
+  const failedPlaybackUrlRef = useRef('');
   const pendingSourceKeyRef = useRef('');
 
   // 播放进度保存相关
@@ -222,6 +224,12 @@ function PlayPageClient() {
   useEffect(() => {
     availableSourcesRef.current = availableSources;
   }, [availableSources]);
+
+  useEffect(() => {
+    activeVideoUrlRef.current = videoUrl;
+    playbackRecoveryInFlightRef.current = false;
+    failedPlaybackUrlRef.current = '';
+  }, [videoUrl]);
 
   // 跳过片头片尾配置相关函数
   const handleSkipConfigChange = async (newConfig: {
@@ -688,6 +696,9 @@ function PlayPageClient() {
       setCurrentId(newId);
       setDetail(newDetail);
       setCurrentEpisodeIndex(targetIndex);
+      relayFallbackAttemptedRef.current = '';
+      playbackRecoveryInFlightRef.current = false;
+      failedPlaybackUrlRef.current = '';
       setSourceSearchError(null);
       setError(null);
       // The network request has finished. Do not keep this lock until canplay:
@@ -708,8 +719,21 @@ function PlayPageClient() {
     }
   };
 
-  const handlePlaybackFailure = async (reason: string) => {
-    if (sourceChangeInFlightRef.current) return;
+  const handlePlaybackFailure = async (
+    reason: string,
+    failedUrl = activeVideoUrlRef.current
+  ) => {
+    if (
+      sourceChangeInFlightRef.current ||
+      !failedUrl ||
+      failedUrl !== activeVideoUrlRef.current ||
+      playbackRecoveryInFlightRef.current ||
+      failedPlaybackUrlRef.current === failedUrl
+    ) {
+      return;
+    }
+    playbackRecoveryInFlightRef.current = true;
+    failedPlaybackUrlRef.current = failedUrl;
     if (firstFrameTimeoutRef.current) {
       clearTimeout(firstFrameTimeoutRef.current);
       firstFrameTimeoutRef.current = null;
@@ -727,7 +751,7 @@ function PlayPageClient() {
     // while preserving a CORS/network fallback.
     if (
       relayUrl &&
-      videoUrl !== relayUrl &&
+      failedUrl !== relayUrl &&
       relayFallbackAttemptedRef.current !== currentKey
     ) {
       relayFallbackAttemptedRef.current = currentKey;
@@ -737,32 +761,9 @@ function PlayPageClient() {
       setVideoUrl(relayUrl);
       return;
     }
-
-    automaticSourceAttemptsRef.current.add(
-      generateStorageKey(currentSourceRef.current, currentIdRef.current)
-    );
-    const candidates = availableSourcesRef.current.filter((candidate) => {
-      const key = generateStorageKey(candidate.source, candidate.id);
-      return !automaticSourceAttemptsRef.current.has(key);
-    });
-
-    for (const candidate of candidates.slice(0, 5)) {
-      automaticSourceAttemptsRef.current.add(
-        generateStorageKey(candidate.source, candidate.id)
-      );
-      const changed = await handleSourceChange(
-        candidate.source,
-        candidate.id,
-        candidate.title
-      );
-      if (changed) {
-        setSourceSearchError(`${reason}，已自动切换到${candidate.source_name}`);
-        return;
-      }
-    }
-
+    playbackRecoveryInFlightRef.current = false;
     setIsVideoLoading(false);
-    setSourceSearchError(`${reason}，暂无其他可用播放源，请稍后重试`);
+    setSourceSearchError(`${reason}，当前源暂时无法播放，请手动选择其他源`);
   };
 
   const armFirstFrameTimeout = () => {
@@ -774,7 +775,7 @@ function PlayPageClient() {
       if (!video || (video.currentTime <= 0 && video.readyState < 3)) {
         void handlePlaybackFailure('首帧加载超时');
       }
-    }, 15_000);
+    }, 45_000);
   };
 
   useEffect(() => {
@@ -1186,12 +1187,12 @@ function PlayPageClient() {
               debug: false, // 关闭日志
               enableWorker: true, // WebWorker 解码，降低主线程压力
               lowLatencyMode: false, // 普通点播不追赶直播边缘，减少误判和重载
-              manifestLoadingTimeOut: 10_000,
-              manifestLoadingMaxRetry: 1,
-              levelLoadingTimeOut: 10_000,
-              levelLoadingMaxRetry: 1,
-              fragLoadingTimeOut: 15_000,
-              fragLoadingMaxRetry: 2,
+              manifestLoadingTimeOut: 30_000,
+              manifestLoadingMaxRetry: 3,
+              levelLoadingTimeOut: 30_000,
+              levelLoadingMaxRetry: 3,
+              fragLoadingTimeOut: 30_000,
+              fragLoadingMaxRetry: 4,
 
               /* 缓冲/内存相关 */
               maxBufferLength: 30, // 前向缓冲最大 30s，过大容易导致高延迟
@@ -1216,9 +1217,11 @@ function PlayPageClient() {
               // warning so recovered playback does not appear as a page crash
               // in browser error monitoring.
               console.warn(
-                'HLS source failed; starting recovery:',
-                event,
-                data
+                `HLS source failed; starting recovery: type=${
+                  data.type || 'unknown'
+                } details=${data.details || 'unknown'} status=${
+                  data.response?.code || 0
+                } error=${data.error?.message || 'unknown'}`
               );
               if (
                 data.type === Hls.ErrorTypes.MEDIA_ERROR &&
@@ -1231,7 +1234,7 @@ function PlayPageClient() {
               hls.destroy();
               video.hls = undefined;
               sourceChangeInFlightRef.current = false;
-              void handlePlaybackFailure('当前视频源加载失败');
+              void handlePlaybackFailure('当前视频源加载失败', url);
             });
           },
         },
@@ -1369,8 +1372,9 @@ function PlayPageClient() {
           clearTimeout(firstFrameTimeoutRef.current);
           firstFrameTimeoutRef.current = null;
         }
-        automaticSourceAttemptsRef.current.clear();
-        if (videoUrl !== getRelayFallbackUrl()) {
+        playbackRecoveryInFlightRef.current = false;
+        failedPlaybackUrlRef.current = '';
+        if (activeVideoUrlRef.current !== getRelayFallbackUrl()) {
           relayFallbackAttemptedRef.current = '';
         }
         sourceChangeInFlightRef.current = false;
@@ -1471,7 +1475,15 @@ function PlayPageClient() {
         if (artPlayerRef.current.currentTime > 0) {
           return;
         }
-        void handlePlaybackFailure('播放器加载失败');
+        // HLS.js has richer network/media error information and owns recovery
+        // for HLS playback. ArtPlayer's generic error event is handled only for
+        // native playback so one failure cannot start two recovery chains.
+        if (!artPlayerRef.current?.video?.hls) {
+          void handlePlaybackFailure(
+            '播放器加载失败',
+            activeVideoUrlRef.current
+          );
+        }
       });
 
       // 监听视频播放结束事件，自动播放下一集

@@ -10,6 +10,7 @@ import {
 import {
   buildContentSecurityPolicy,
   getSafeRedirect,
+  isDirectMediaUrlAllowed,
   serializeForInlineScript,
 } from '../security';
 import {
@@ -89,6 +90,12 @@ describe('security helpers', () => {
       "script-src 'self' 'unsafe-inline'"
     );
     expect(buildContentSecurityPolicy(false)).toContain("connect-src 'self'");
+    expect(buildContentSecurityPolicy(false)).toContain(
+      'https://*.zuidazym3u8.com'
+    );
+    expect(buildContentSecurityPolicy(false)).not.toMatch(
+      /connect-src[^;]*(?:^|\s)https:(?:\s|;)/
+    );
   });
 
   it('allows only nonce-bearing inline scripts in production', () => {
@@ -96,6 +103,21 @@ describe('security helpers', () => {
     expect(policy).toContain("'nonce-test-nonce'");
     expect(policy).toContain("'strict-dynamic'");
     expect(policy).not.toContain("script-src 'self' 'unsafe-inline'");
+  });
+
+  it('allows direct playback only from reviewed HTTPS media CDNs', () => {
+    expect(
+      isDirectMediaUrlAllowed('https://v11.adfg8.vip/show/index.m3u8')
+    ).toBe(true);
+    expect(
+      isDirectMediaUrlAllowed('https://p.jisuts.com:999/show/one.ts')
+    ).toBe(true);
+    expect(
+      isDirectMediaUrlAllowed('https://unreviewed.example/show/index.m3u8')
+    ).toBe(false);
+    expect(
+      isDirectMediaUrlAllowed('http://v11.adfg8.vip/show/index.m3u8')
+    ).toBe(false);
   });
 
   it('limits and validates JSON request bodies', async () => {

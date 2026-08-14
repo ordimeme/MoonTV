@@ -4,6 +4,7 @@ import { webcrypto } from 'node:crypto';
 
 import {
   createMediaRelayPath,
+  DIRECT_HLS_REFERENCE_THRESHOLD,
   isSafeMediaUrl,
   MAX_MANIFEST_REFERENCES,
   relayMediaUrls,
@@ -110,5 +111,30 @@ describe('media relay security', () => {
     await expect(
       createMediaRelayPath('https://127.0.0.1/a.m3u8', secret)
     ).rejects.toThrow('不安全的视频地址');
+  });
+
+  it('keeps large VOD segment lists direct while relaying keys', async () => {
+    const segments = Array.from(
+      { length: DIRECT_HLS_REFERENCE_THRESHOLD + 1 },
+      (_, index) => `segment-${index}.ts`
+    );
+    const manifest = [
+      '#EXTM3U',
+      '#EXT-X-KEY:METHOD=AES-128,URI="key.bin"',
+      ...segments,
+    ].join('\n');
+
+    const rewritten = await rewriteHlsManifest(
+      manifest,
+      'https://v11.adfg8.vip/show/index.m3u8',
+      secret
+    );
+
+    expect(rewritten).toContain('https://v11.adfg8.vip/show/segment-0.ts');
+    expect(rewritten).toContain(
+      `https://v11.adfg8.vip/show/segment-${DIRECT_HLS_REFERENCE_THRESHOLD}.ts`
+    );
+    expect(rewritten.match(/\/api\/media\?/g)).toHaveLength(1);
+    expect(rewritten).not.toContain('URI="key.bin"');
   });
 });
