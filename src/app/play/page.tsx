@@ -31,6 +31,10 @@ import {
 } from '@/lib/db.client';
 import { filterInterstitialAdsFromM3U8 } from '@/lib/m3u8-ad-filter';
 import { matchPlayableSources } from '@/lib/media-match';
+import {
+  createPlaybackSourceKey,
+  planNextPlaybackSourceSwitch,
+} from '@/lib/playback-failover';
 import { PLAYER_ICONS } from '@/lib/player-icons';
 import { SearchResult } from '@/lib/types';
 import { processImageUrl } from '@/lib/utils';
@@ -182,6 +186,8 @@ function PlayPageClient() {
   const playbackRecoveryInFlightRef = useRef(false);
   const failedPlaybackUrlRef = useRef('');
   const pendingSourceKeyRef = useRef('');
+  const automaticSourceAttemptsRef = useRef<Set<string>>(new Set());
+  const automaticSourceSwitchCountRef = useRef(0);
 
   // 播放进度保存相关
   const saveIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -596,7 +602,8 @@ function PlayPageClient() {
   const handleSourceChange = async (
     newSource: string,
     newId: string,
-    newTitle: string
+    newTitle: string,
+    automatic = false
   ): Promise<boolean> => {
     if (
       sourceChangeInFlightRef.current ||
@@ -614,6 +621,10 @@ function PlayPageClient() {
     }
 
     try {
+      if (!automatic) {
+        automaticSourceAttemptsRef.current.clear();
+        automaticSourceSwitchCountRef.current = 0;
+      }
       setSourceSearchError(null);
       sourceChangeInFlightRef.current = true;
       pendingSourceKeyRef.current = generateStorageKey(newSource, newId);
@@ -762,8 +773,51 @@ function PlayPageClient() {
       return;
     }
     playbackRecoveryInFlightRef.current = false;
+
+    automaticSourceAttemptsRef.current.add(
+      createPlaybackSourceKey(currentSourceRef.current, currentIdRef.current)
+    );
+
+    let switchPlan = planNextPlaybackSourceSwitch(
+      availableSourcesRef.current,
+      automaticSourceAttemptsRef.current,
+      automaticSourceSwitchCountRef.current,
+      { title: videoTitleRef.current, year: videoYearRef.current }
+    );
+    while (switchPlan) {
+      const candidate = switchPlan.source;
+
+      automaticSourceAttemptsRef.current.add(
+        createPlaybackSourceKey(candidate.source, candidate.id)
+      );
+      automaticSourceSwitchCountRef.current = switchPlan.switchCount;
+      setVideoLoadingStage('sourceChanging');
+      setIsVideoLoading(true);
+      setSourceSearchError(`${reason}，正在自动切换到${candidate.source_name}`);
+
+      const changed = await handleSourceChange(
+        candidate.source,
+        candidate.id,
+        candidate.title,
+        true
+      );
+      if (changed) {
+        setSourceSearchError(`已自动切换到${candidate.source_name}，正在加载`);
+        return;
+      }
+
+      switchPlan = planNextPlaybackSourceSwitch(
+        availableSourcesRef.current,
+        automaticSourceAttemptsRef.current,
+        automaticSourceSwitchCountRef.current,
+        { title: videoTitleRef.current, year: videoYearRef.current }
+      );
+    }
+
     setIsVideoLoading(false);
-    setSourceSearchError(`${reason}，当前源暂时无法播放，请手动选择其他源`);
+    setSourceSearchError(
+      `${reason}，自动尝试其他源后仍无法播放，请手动选择其他源`
+    );
   };
 
   const armFirstFrameTimeout = () => {
@@ -1374,6 +1428,8 @@ function PlayPageClient() {
         }
         playbackRecoveryInFlightRef.current = false;
         failedPlaybackUrlRef.current = '';
+        automaticSourceAttemptsRef.current.clear();
+        automaticSourceSwitchCountRef.current = 0;
         if (activeVideoUrlRef.current !== getRelayFallbackUrl()) {
           relayFallbackAttemptedRef.current = '';
         }
